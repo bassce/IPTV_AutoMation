@@ -1,0 +1,19 @@
+{
+  "github_search": {
+    "search_query": "直播源",
+    "search_days": 25,
+    "github_token": "Your_GitHub_Token_Here"
+  },
+  "source_checker": {
+    "semaphore_limit": 20,
+    "height_limit": null,
+    "codec_exclude_list": [
+      "Unknown"
+    ],
+    "latency_limit": 3000,
+    "retry_limit": 1
+  },
+  "scheduler": {
+    "interval_minutes": 30
+  }
+}

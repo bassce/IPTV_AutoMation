@@ -1,0 +1,9 @@
+requests
+flask
+schedule
+ffmpeg-python
+pandas
+openpyxl
+aiohttp
+aiofiles
+SQLAlchemy
