@@ -182,7 +182,7 @@ async def main():
         tvg_name TEXT,
         group_title TEXT,
         aliasesname TEXT,
-        tvordero INTEGER,
+        tvordero TEXT,
         tvg_logor TEXT,
         title TEXT,
         url TEXT,
@@ -216,8 +216,8 @@ def save_filtered_sources_and_m3u8_from_db(filtered_m3u8):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
-    # 从filtered_playlists表中读取数据
-    cursor.execute('SELECT tvg_name, group_title, title, url FROM filtered_playlists ORDER BY latency ASC')
+    # 按照表中内容的先后顺序（默认插入顺序）读取数据
+    cursor.execute('SELECT tvg_name, group_title, title, url FROM filtered_playlists ORDER BY id ASC')
     filtered_sources = cursor.fetchall()
 
     with open(filtered_m3u8, 'w', encoding='utf-8') as m3u8_file:
@@ -227,6 +227,7 @@ def save_filtered_sources_and_m3u8_from_db(filtered_m3u8):
             m3u8_file.write(f"{source[3]}\n")
 
     conn.close()
+
 
 def color_cell(cell):
     if cell >= 3000:
