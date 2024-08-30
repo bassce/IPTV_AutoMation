@@ -1,12 +1,12 @@
 # 使用轻量级的 Python 3.12 Alpine 镜像作为基础
-FROM python:3.12-alpine
+FROM python:3.12.5-alpine
 
 # 设置工作目录
 WORKDIR /app
 
 # 安装必要的系统依赖并升级pip
 RUN apk add --no-cache --virtual .build-deps \
-    gcc musl-dev libffi-dev openssl-dev make \
+    build-base gcc musl-dev libffi-dev openssl-dev make \
     && apk add --no-cache ffmpeg bash sqlite \
     && pip install --upgrade pip
 
@@ -14,20 +14,18 @@ RUN apk add --no-cache --virtual .build-deps \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 删除构建依赖项
+# 删除构建依赖项以减少镜像大小
 RUN apk del .build-deps
 
 # 将项目的其余文件复制到容器中
-COPY config.json .
-COPY daily_monitor.py .
-COPY db_setup.py .
-COPY entrypoint.sh .
-COPY ffmpeg_source_checker.py .
-COPY flask_server.py .
-COPY github_search.py .
-COPY import_playlists.py .
-COPY scheduler.py .
-COPY data/filter_conditions.xlsx /filter_conditions.xlsx
+COPY . .
+
+# 创建data目录，并将filter_conditions.xlsx复制到/app/data/
+RUN mkdir -p /app/data \
+    && cp /filter_conditions.xlsx /app/data/filter_conditions.xlsx
+
+# 设置宿主机与容器的共享目录
+VOLUME /app/data
 
 # 添加 Docker 参数作为环境变量
 ENV GITHUB_SEARCH_QUERY="直播源" \
@@ -40,15 +38,9 @@ ENV GITHUB_SEARCH_QUERY="直播源" \
     RETRY_LIMIT=1 \
     SCHEDULER_INTERVAL_MINUTES=30 \
     SEARCH_INTERVAL_DAYS=2
-    
-# 复制并设置入口脚本权限
+
+# 设置入口脚本权限
 RUN chmod +x /app/entrypoint.sh
-
-# 创建data空目录
-RUN mkdir -p /app/data
-
-# 设置宿主机与容器的共享目录
-VOLUME /app/data
 
 # 设置启动命令
 ENTRYPOINT ["/app/entrypoint.sh"]
