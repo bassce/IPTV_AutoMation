@@ -10,71 +10,37 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 app = Flask(__name__)
 
-def get_channel_sources(aliasesname):
+def get_channel_url(aliasesname):
     try:
-        conn = sqlite3.connect("data/iptv_sources.db")
-        query = """
-        SELECT * FROM filtered_playlists
-        WHERE aliasesname = ?
-        AND download_speed > 0
-        AND latency IS NOT NULL
-        ORDER BY download_speed DESC
-        """
-        df = pd.read_sql_query(query, conn, params=(aliasesname,))
+        df = pd.read_sql_query('SELECT * FROM filtered_playlists ORDER BY latency ASC', "sqlite:///data/iptv_sources.db")
+        filtered_df = df[df['aliasesname'] == aliasesname]
         
-        if not df.empty:
-            return df
+        if not filtered_df.empty:
+            selected_source = filtered_df.iloc[0]
+            logging.info(f"Selected source for {aliasesname}: URL={selected_source['url']}, "
+                         f"Latency={selected_source['latency']}ms, Resolution={selected_source['resolution']}, "
+                         f"Format={selected_source['format']}")
+            return selected_source['url']
         else:
-            logging.warning(f"No valid sources found for {aliasesname}")
+            logging.warning(f"No source found for {aliasesname}")
             return None
     except Exception as e:
-        logging.error(f"Failed to get channel sources for {aliasesname}: {e}")
+        logging.error(f"Failed to get channel URL for {aliasesname}: {e}")
         return None
-    finally:
-        conn.close()
-
-@app.route('/<aliasesname>')
-def redirect_channel(aliasesname):
-    sources = get_channel_sources(aliasesname)
-    if sources is not None:
-        for _, source in sources.iterrows():
-            try:
-                # 尝试重定向到每个源
-                url = source['url']
-                logging.info(f"Redirecting {aliasesname} to {url}")
-                return redirect(url)
-            except Exception as e:
-                # 如果重定向失败，尝试下一个源
-                logging.warning(f"Failed to redirect {aliasesname} to {url}: {e}")
-                continue
-        logging.error(f"All sources for {aliasesname} failed.")
-        return "All sources failed", 500
-    else:
-        logging.warning(f"Channel not found: {aliasesname}")
-        return "Channel not found", 404
 
 def generate_m3u8_file():
     try:
-        conn = sqlite3.connect("data/iptv_sources.db")
-        df = pd.read_sql_query("""
-        SELECT * FROM filtered_playlists
-        WHERE download_speed > 0
-        AND latency IS NOT NULL
-        ORDER BY tvordero ASC
-        """, conn)
-
+        df = pd.read_sql_query('SELECT * FROM filtered_playlists', "sqlite:///data/iptv_sources.db")
+        unique_channels = set()
         m3u8_path = 'data/aggregated_channels.m3u8'
 
         with open(m3u8_path, 'w', encoding='utf-8') as m3u8_file:
             m3u8_file.write("#EXTM3U\n")
-            unique_channels = set()
-
             for _, row in df.iterrows():
-                aliasesname = row['aliasesname']
-                if aliasesname not in unique_channels:
+                if row['aliasesname'] not in unique_channels:
                     m3u8_file.write(f"#EXTINF:-1 tvg-name=\"{row['tvg_name']}\" group-title=\"{row['group_title']}\",{row['title']}\n")
                     m3u8_file.write(f"http://{get_host_ip()}:5000/{row['aliasesname']}\n")
-                    unique_channels.add(aliasesname)
+                    unique_channels.add(row['aliasesname'])
                     logging.info(f"Added channel to M3U8: {row['title']} with URL path /{row['aliasesname']}")
 
         logging.info(f"Generated {m3u8_path} file successfully.")
@@ -82,8 +48,6 @@ def generate_m3u8_file():
         logging.error(f"Database error while generating M3U8 file: {db_err}")
     except Exception as e:
         logging.error(f"Error generating M3U8 file: {e}")
-    finally:
-        conn.close()
 
 def get_host_ip():
     try:
@@ -92,6 +56,16 @@ def get_host_ip():
     except Exception as e:
         logging.error(f"Failed to get host IP: {e}")
         return 'localhost'
+
+@app.route('/<aliasesname>')
+def redirect_channel(aliasesname):
+    url = get_channel_url(aliasesname)
+    if url:
+        logging.info(f"Redirecting {aliasesname} to {url}")
+        return redirect(url)
+    else:
+        logging.warning(f"Channel not found: {aliasesname}")
+        return "Channel not found", 404
 
 @app.route('/aggregated_channels.m3u8')
 def serve_m3u8():

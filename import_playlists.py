@@ -20,7 +20,7 @@ def similarity(a, b):
 def match_tvg_name(text, sources):
     """增强匹配，首先尝试完整匹配，然后进行相似度比较"""
     potential_matches = []
-    
+
     # 逐字匹配，记录所有可能的匹配
     for tvg_id, tvg_name, group_title, aliasesname, tvordero, tvg_logor in sources:
         if tvg_name in text:
@@ -37,6 +37,23 @@ def match_tvg_name(text, sources):
 
     # 如果没有找到匹配，返回None
     return None
+
+def parse_line(line):
+    """解析每一行，确保正确分隔 title 和 url"""
+    parts = line.split(',', 1)  # 只分割一次，避免误分割
+    if len(parts) != 2:
+        logging.error(f"Invalid line format: {line}")
+        return None, None
+    
+    title = parts[0].strip()
+    url = parts[1].strip()
+
+    # 检查 URL 格式的有效性
+    if not (url.startswith("http://") or url.startswith("https://") or url.startswith("rtsp://")):
+        logging.error(f"Invalid URL format: {url}")
+        return None, None
+
+    return title, url
 
 def import_playlists():
     # 定义数据库文件路径
@@ -63,7 +80,7 @@ def import_playlists():
             tvg_logor TEXT,
             title TEXT,
             url TEXT,
-            latency TEXT,
+            latency INTEGER,
             resolution TEXT,
             format TEXT,
             UNIQUE(url)  -- 添加唯一约束，防止重复
@@ -80,21 +97,22 @@ def import_playlists():
                 with open(file, 'r', encoding='utf-8') as f:
                     lines = f.readlines()
 
-                title = None
                 current_tvg_info = None
+                title = None
 
                 for line in lines:
                     line = line.strip()
 
+                    # 检查是否是#EXTINF开头的行
                     if line.startswith("#EXTINF"):
                         title = extract_text(line)
                         current_tvg_info = match_tvg_name(line, sources)
-                    
-                    elif "," in line and "http" in line:
-                        # 支持 `频道名称,URL` 这种形式的解析
-                        title, url = line.split(",", 1)
-                        title = title.strip()
-                        url = url.strip()
+
+                    # 处理没有#EXTINF标签，直接为“频道名称,URL”的行
+                    elif ',' in line:
+                        parts = line.split(',', 1)
+                        title = parts[0].strip()
+                        url = parts[1].strip()
                         current_tvg_info = match_tvg_name(title, sources)
                         if current_tvg_info:
                             tvg_id, tvg_name, group_title, aliasesname, tvordero, tvg_logor = current_tvg_info
@@ -103,14 +121,13 @@ def import_playlists():
                             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                             ''', (tvg_id, tvg_name, group_title, aliasesname, tvordero, tvg_logor, title, url))
 
-                    elif line and not line.startswith("#"):
-                        # 处理URL行
-                        if current_tvg_info:
-                            tvg_id, tvg_name, group_title, aliasesname, tvordero, tvg_logor = current_tvg_info
-                            cursor.execute('''
-                            INSERT OR IGNORE INTO iptv_playlists (tvg_id, tvg_name, group_title, aliasesname, tvordero, tvg_logor, title, url)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                            ''', (tvg_id, tvg_name, group_title, aliasesname, tvordero, tvg_logor, title, line))
+                    # 处理URL行
+                    elif current_tvg_info and line and not line.startswith("#"):
+                        tvg_id, tvg_name, group_title, aliasesname, tvordero, tvg_logor = current_tvg_info
+                        cursor.execute('''
+                        INSERT OR IGNORE INTO iptv_playlists (tvg_id, tvg_name, group_title, aliasesname, tvordero, tvg_logor, title, url)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (tvg_id, tvg_name, group_title, aliasesname, tvordero, tvg_logor, title, line))
 
         # 提交更改
         conn.commit()
@@ -120,7 +137,6 @@ def import_playlists():
     except Exception as e:
         logging.error(f"发生错误: {e}")
     finally:
-        # 确保关闭连接
         if conn:
             conn.close()
 
