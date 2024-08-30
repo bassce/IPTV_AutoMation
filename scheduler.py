@@ -7,6 +7,7 @@ import psutil
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+
 # 读取配置文件
 def load_config():
     try:
@@ -29,6 +30,9 @@ def load_config():
         config['source_checker']['retry_limit'] = int(os.getenv('RETRY_LIMIT', config['source_checker']['retry_limit']))
 
         config['scheduler']['interval_minutes'] = int(os.getenv('SCHEDULER_INTERVAL_MINUTES', config['scheduler']['interval_minutes']))
+
+        # 新增读取 host_ip 环境变量
+        config['host_ip'] = os.getenv('HOST_IP', config.get('host_ip', 'localhost'))
         
         return config
     except FileNotFoundError:
@@ -100,4 +104,3 @@ def run_scheduler():
 
 if __name__ == "__main__":
     run_scheduler()
-

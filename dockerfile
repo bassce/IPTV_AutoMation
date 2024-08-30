@@ -30,14 +30,14 @@ VOLUME /app/data
 ENV GITHUB_SEARCH_QUERY="直播源" \
     GITHUB_SEARCH_DAYS=25 \
     GITHUB_TOKEN="" \
-    THREAD_LIMIT=10 \
+    THREAD_LIMIT=8 \
     HEIGHT_LIMIT=null \
     CODEC_EXCLUDE_LIST=Unknown \
     LATENCY_LIMIT=5000 \
     RETRY_LIMIT=1 \
     SCHEDULER_INTERVAL_MINUTES=30 \
     SEARCH_INTERVAL_DAYS=2 \
-    host_ip=""
+    HOST_IP=""
 
 
 # 设置入口脚本权限

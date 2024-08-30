@@ -16,6 +16,6 @@
     "search_interval_days": 2
   },
   "network": {
-    "host_ip": "localhost"
+    "host_ip": "127.0.0.1"
   }
 }

@@ -17,7 +17,7 @@ def load_config():
     return config
 
 config = load_config()
-HOST_IP = config["network"]["host_ip"]
+HOST_IP = os.getenv('HOST_IP', config["network"]["host_ip"])
 
 def get_channel_sources(aliasesname):
     try:
@@ -83,7 +83,6 @@ def generate_m3u8_file():
                     m3u8_file.write(f"http://{HOST_IP}:5000/{row['aliasesname']}\n")
                     unique_channels.add(aliasesname)
                     logging.info(f"Added channel to M3U8: {row['title']} with URL path /{row['aliasesname']}")
-
         logging.info(f"Generated {m3u8_path} file successfully.")
     except sqlite3.DatabaseError as db_err:
         logging.error(f"Database error while generating M3U8 file: {db_err}")
