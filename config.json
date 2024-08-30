@@ -14,5 +14,8 @@
   "scheduler": {
     "interval_minutes": 30,
     "search_interval_days": 2
+  },
+  "network": {
+    "host_ip": "localhost"
   }
 }

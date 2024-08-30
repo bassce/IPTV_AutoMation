@@ -8,7 +8,8 @@ WORKDIR /app
 RUN apk add --no-cache --virtual .build-deps \
     build-base gcc musl-dev libffi-dev openssl-dev make \
     && apk add --no-cache ffmpeg bash sqlite \
-    && pip install --upgrade pip
+    && pip install --upgrade pip \
+    && mkdir -p /app/data # 创建data目录，
 
 # 将requirements.txt复制到容器中并安装Python依赖
 COPY requirements.txt .
@@ -19,10 +20,6 @@ RUN apk del .build-deps
 
 # 将项目的其余文件复制到容器中
 COPY . .
-
-# 创建data目录，并将filter_conditions.xlsx复制到/app/data/
-RUN mkdir -p /app/data \
-    && cp /filter_conditions.xlsx /app/data/filter_conditions.xlsx
 
 # 设置宿主机与容器的共享目录
 VOLUME /app/data

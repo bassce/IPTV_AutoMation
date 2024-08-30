@@ -2,13 +2,22 @@ from flask import Flask, redirect, send_file
 import pandas as pd
 import os
 import logging
-import socket
 import sqlite3
+import json
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 app = Flask(__name__)
+
+# 加载配置文件
+def load_config():
+    with open("config.json", "r", encoding='utf-8') as f:
+        config = json.load(f)
+    return config
+
+config = load_config()
+HOST_IP = config["network"]["host_ip"]
 
 def get_channel_sources(aliasesname):
     try:
@@ -39,12 +48,10 @@ def redirect_channel(aliasesname):
     if sources is not None:
         for _, source in sources.iterrows():
             try:
-                # 尝试重定向到每个源
                 url = source['url']
                 logging.info(f"Redirecting {aliasesname} to {url}")
                 return redirect(url)
             except Exception as e:
-                # 如果重定向失败，尝试下一个源
                 logging.warning(f"Failed to redirect {aliasesname} to {url}: {e}")
                 continue
         logging.error(f"All sources for {aliasesname} failed.")
@@ -73,7 +80,7 @@ def generate_m3u8_file():
                 aliasesname = row['aliasesname']
                 if aliasesname not in unique_channels:
                     m3u8_file.write(f"#EXTINF:-1 tvg-name=\"{row['tvg_name']}\" group-title=\"{row['group_title']}\",{row['title']}\n")
-                    m3u8_file.write(f"http://{get_host_ip()}:5000/{row['aliasesname']}\n")
+                    m3u8_file.write(f"http://{HOST_IP}:5000/{row['aliasesname']}\n")
                     unique_channels.add(aliasesname)
                     logging.info(f"Added channel to M3U8: {row['title']} with URL path /{row['aliasesname']}")
 
@@ -84,14 +91,6 @@ def generate_m3u8_file():
         logging.error(f"Error generating M3U8 file: {e}")
     finally:
         conn.close()
-
-def get_host_ip():
-    try:
-        hostname = socket.gethostname()
-        return socket.gethostbyname(hostname)
-    except Exception as e:
-        logging.error(f"Failed to get host IP: {e}")
-        return 'localhost'
 
 @app.route('/aggregated_channels.m3u8')
 def serve_m3u8():
@@ -108,7 +107,7 @@ def serve_m3u8():
         return "Internal server error", 500
 
 if __name__ == "__main__":
-    generate_m3u8_file()  # 生成总的 M3U8 文件
+    generate_m3u8_file()
     try:
         app.run(host='0.0.0.0', port=5000)
     except Exception as e:
