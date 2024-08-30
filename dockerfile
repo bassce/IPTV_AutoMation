@@ -8,6 +8,8 @@ WORKDIR /app
 RUN apk add --no-cache --virtual .build-deps \
     build-base gcc musl-dev libffi-dev openssl-dev make \
     && apk add --no-cache ffmpeg bash sqlite \
+    && cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
+    && echo "Asia/Shanghai" > /etc/timezone \
     && pip install --upgrade pip \
     && mkdir -p /app/data # 创建data目录，
 
@@ -27,14 +29,16 @@ VOLUME /app/data
 # 添加 Docker 参数作为环境变量
 ENV GITHUB_SEARCH_QUERY="直播源" \
     GITHUB_SEARCH_DAYS=25 \
-    GITHUB_TOKEN="your_github_token" \
+    GITHUB_TOKEN="" \
     THREAD_LIMIT=10 \
     HEIGHT_LIMIT=null \
     CODEC_EXCLUDE_LIST=Unknown \
     LATENCY_LIMIT=5000 \
     RETRY_LIMIT=1 \
     SCHEDULER_INTERVAL_MINUTES=30 \
-    SEARCH_INTERVAL_DAYS=2
+    SEARCH_INTERVAL_DAYS=2 \
+    host_ip=""
+
 
 # 设置入口脚本权限
 RUN chmod +x /app/entrypoint.sh
