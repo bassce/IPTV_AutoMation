@@ -3,6 +3,7 @@ import json
 import subprocess
 import logging
 import concurrent.futures
+from calculate_score import calculate_score  # 导入 calculate_score 函数
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -63,6 +64,13 @@ def test_stream(source):
     while retry_count < RETRY_LIMIT:
         try:
             resolution, format = get_video_info(url)
+            stability = 1  # 这里可以使用实际值
+            success_rate = 1  # 这里可以使用实际值
+            latency = 0  # 默认值，实际值在 daily_monitor.py 中检测
+            download_speed = 0.0  # 默认值，实际值在 daily_monitor.py 中检测
+
+            # 计算评分后进行四舍五入处理
+            score = round(calculate_score(resolution, format, latency, download_speed, stability, success_rate), 4)
 
             if HEIGHT_LIMIT is not None:
                 if HEIGHT_LIMIT == 0:
@@ -77,7 +85,7 @@ def test_stream(source):
                 logging.info(f"Excluding source with format {format}: {url}")
                 return None
 
-            logging.info(f"Stream OK: {url} | Resolution: {resolution} | Format: {format}")
+            logging.info(f"Stream OK: {url} | Resolution: {resolution} | Format: {format} | Score: {score}")
             return {
                 "url": url,
                 "resolution": resolution,
@@ -86,12 +94,13 @@ def test_stream(source):
                 "tvg_name": source["tvg_name"],
                 "group_title": source["group_title"],
                 "aliasesname": source["aliasesname"],
-                "tvordero": source["tvordero"],  # 确保tvordero被包含
+                "tvordero": source["tvordero"],
                 "tvg_logor": source["tvg_logor"],
                 "title": source["title"],
                 "id": source["id"],
-                "latency": 0,  # 示例值
-                "download_speed": 0.0  # 示例值
+                "latency": latency,  # 默认值
+                "download_speed": download_speed,  # 默认值
+                "score": score  # 确保这个值是浮点数
             }
 
         except Exception as e:
@@ -137,7 +146,7 @@ def run_tests():
     # 删除现有的 filtered_playlists 表（如果存在）
     cursor.execute('DROP TABLE IF EXISTS filtered_playlists')
 
-    # 创建新的 filtered_playlists 表
+    # 创建新的 filtered_playlists 表，包括评分列
     cursor.execute('''
     CREATE TABLE filtered_playlists (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -152,7 +161,8 @@ def run_tests():
         latency INTEGER,
         resolution TEXT,
         format TEXT,
-        download_speed FLOAT
+        download_speed FLOAT,
+        score FLOAT
     )
     ''')
 
@@ -164,9 +174,9 @@ def run_tests():
         ''', (result["resolution"], result["format"], result["id"]))
 
         cursor.execute('''
-            INSERT INTO filtered_playlists (tvg_id, tvg_name, group_title, aliasesname, tvordero, tvg_logor, title, url, latency, resolution, format, download_speed)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (result["tvg_id"], result["tvg_name"], result["group_title"], result["aliasesname"], result["tvordero"], result["tvg_logor"], result["title"], result["url"], result["latency"], result["resolution"], result["format"], result["download_speed"]))
+            INSERT INTO filtered_playlists (tvg_id, tvg_name, group_title, aliasesname, tvordero, tvg_logor, title, url, latency, resolution, format, download_speed, score)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (result["tvg_id"], result["tvg_name"], result["group_title"], result["aliasesname"], result["tvordero"], result["tvg_logor"], result["title"], result["url"], result["latency"], result["resolution"], result["format"], result["download_speed"], result["score"]))
 
     conn.commit()
     conn.close()

@@ -8,6 +8,7 @@ import pandas as pd
 import concurrent.futures
 import aiohttp
 import asyncio
+from calculate_score import calculate_score, initialize_stability_and_success_rate, update_stability_and_success_rate  # 引入评分机制及相关函数
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -78,7 +79,7 @@ def get_stream_info(url, duration, threads=THREADS):
     ]
     try:
         start_time = time.time()
-        result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=duration + 2)
+        result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=duration + 2, encoding='utf-8', errors='ignore')
         elapsed_time = time.time() - start_time
 
         # 忽略初始波动时间
@@ -113,35 +114,69 @@ def test_stream(source):
         logging.info(f"Skipping source due to high latency ({latency} ms): {url}")
         return None
 
+    # 获取之前的评分（包含固定的分辨率和格式评分，以及之前累积的评分）
+    previous_score = source.get("score", 0)
+    stability = source.get("stability", 0.9)
+    success_rate = source.get("success_rate", 0.95)
+
+    # 获取下载速度
     download_info = get_stream_info(url, LATENCY_LIMIT)
     logging.info(f"Stream OK: {url} | Latency: {latency} ms | Download Speed: {download_info['download_speed']} KB/s")
+
+    # 检测是否成功
+    success = download_info["download_speed"] > 0
+
+    # 更新稳定性和成功率
+    stability, success_rate = update_stability_and_success_rate(stability, success_rate, success)
+
+    # 使用calculate_score进行评分更新，综合处理
+    updated_score = calculate_score(
+        resolution_value=source.get("resolution_value", None),  # 累积的分辨率评分
+        format=source.get("format", None),                     # 累积的视频格式评分
+        latency=latency / 1000,  # 将延迟转换为秒
+        download_speed=download_info["download_speed"] / 1024,  # 将下载速度转换为 Mbps
+        stability=stability,          # 使用累积的稳定性
+        success_rate=success_rate,      # 使用累积的成功率
+        previous_score=previous_score  # 传递已有的评分进行累积
+    )
+
     return {
         "id": source["id"],
         "latency": latency,
-        "download_speed": download_info["download_speed"]
+        "download_speed": download_info["download_speed"],
+        "stability": stability,
+        "success_rate": success_rate,
+        "score": updated_score  # 返回最终累积评分
     }
 
 def run_tests():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
+    # 先清空延迟和下载速度的旧数据
     cursor.execute('UPDATE filtered_playlists SET latency = NULL, download_speed = NULL')
     conn.commit()
 
-    cursor.execute('SELECT id, url FROM filtered_playlists')
+    # 选择直播源进行测试
+    cursor.execute('SELECT id, url, score FROM filtered_playlists')  # 获取 id, url, score 字段
     sources = cursor.fetchall()
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=THREADS) as executor:
-        results = list(executor.map(test_stream, [{"id": source[0], "url": source[1]} for source in sources]))
+        results = list(executor.map(test_stream, [{"id": source[0], "url": source[1], "score": source[2]} for source in sources]))
 
     for result in results:
         if result:
             cursor.execute('''
                 UPDATE filtered_playlists
-                SET latency = ?, download_speed = ?
+                SET latency = ?, download_speed = ?, score = ?
                 WHERE id = ?
-            ''', (result["latency"], result["download_speed"], result["id"]))
+            ''', (result["latency"], result["download_speed"], result["score"], result["id"]))
 
+    conn.commit()
+
+    # 创建或替换只读表
+    cursor.execute("DROP TABLE IF EXISTS filtered_playlists_readonly")
+    cursor.execute("CREATE TABLE filtered_playlists_readonly AS SELECT * FROM filtered_playlists")
     conn.commit()
 
     df = pd.read_sql_query("SELECT * FROM filtered_playlists ORDER BY id", conn)
@@ -161,7 +196,7 @@ def run_tests():
         except ValueError:
             return ''
 
-    df_style = df.style.applymap(highlight_speed, subset=['download_speed'])
+    df_style = df.style.map(highlight_speed, subset=['download_speed'])
     df_style.to_excel('data/filtered_sources.xlsx', index=False)
 
     with open('data/filtered_sources.m3u8', 'w', encoding='utf-8') as f:

@@ -23,11 +23,11 @@ def get_channel_sources(aliasesname):
     try:
         conn = sqlite3.connect("data/iptv_sources.db")
         query = """
-        SELECT * FROM filtered_playlists
+        SELECT * FROM filtered_playlists_readonly
         WHERE aliasesname = ?
         AND download_speed > 0
         AND latency IS NOT NULL
-        ORDER BY download_speed DESC
+        ORDER BY score DESC  -- 根据评分机制选择直播源
         """
         df = pd.read_sql_query(query, conn, params=(aliasesname,))
         
@@ -49,11 +49,11 @@ def redirect_channel(aliasesname):
         for _, source in sources.iterrows():
             try:
                 url = source['url']
-                logging.info(f"Redirecting {aliasesname} to {url}")
+                logging.info(f"Attempting to redirect {aliasesname} to {url}")
                 return redirect(url)
             except Exception as e:
                 logging.warning(f"Failed to redirect {aliasesname} to {url}: {e}")
-                continue
+                continue  # 如果无法播放，继续尝试下一个源
         logging.error(f"All sources for {aliasesname} failed.")
         return "All sources failed", 500
     else:
@@ -64,7 +64,7 @@ def generate_m3u8_file():
     try:
         conn = sqlite3.connect("data/iptv_sources.db")
         df = pd.read_sql_query("""
-        SELECT * FROM filtered_playlists
+        SELECT * FROM filtered_playlists_readonly
         WHERE download_speed > 0
         AND latency IS NOT NULL
         ORDER BY tvordero ASC
