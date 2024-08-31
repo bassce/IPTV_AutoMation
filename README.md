@@ -1,11 +1,16 @@
-PTV_AutoMation
-IPTV_AutoMation 是一款由 ChatGPT 使用 Python 编写的 IPTV 自动化工具，用于定期搜索 IPTV 资源、检测节目源质量、聚合网关，并实现推流管理。以下是软件的主要功能：
+# IPTV_AutoMation
 
-关键字搜索 IPTV 资源: 从 GitHub 搜索包含“直播源”关键字的仓库，自动下载后缀为 .m3u、.m3u8、.txt 的节目源，筛选最近 25 天内发布或推送的内容并保存。
-节目源质量检测: 检测指定文件夹内的节目源延迟、视频分辨率和下载速度，并根据筛选条件提取符合要求的节目源，按 IPTV 规范格式保存。
-Flask 服务器: 使用 Flask 创建指定频道的固定网址，让网址跳转到符合条件的节目源中速度最快的源。
+IPTV_AutoMation 是一款由 ChatGPT 使用 Python 编写的 IPTV 自动化工具，用于定期搜索 IPTV 资源、检测节目源质量、聚合网关，并实现推流管理。
 
-文件结构目录
+## 功能简介
+
+- **关键字搜索 IPTV 资源**: 从 GitHub 搜索包含“直播源”关键字的仓库，自动下载后缀为 `.m3u`、`.m3u8`、`.txt` 的节目源，筛选最近 25 天内发布或推送的内容并保存。
+- **节目源质量检测**: 检测指定文件夹内的节目源延迟、视频分辨率和下载速度，并根据筛选条件提取符合要求的节目源，按 IPTV 规范格式保存。
+- **Flask 服务器**: 使用 Flask 创建指定频道的固定网址，让网址跳转到符合条件的节目源中速度最快的源。
+
+## 文件结构目录
+
+```
 iptv_automation/
 │
 ├── data/
@@ -27,23 +32,32 @@ iptv_automation/
 ├── requirements.txt                   # Python 依赖库列表
 ├── config.json                        # 项目核心参数配置文件
 ├── entrypoint.sh                      # 启用脚本
-└── filter_conditions.xlsx             # filter_conditions.xlsx备份，docker镜像默认从它复制到data文件夹中
+└── filter_conditions.xlsx             # filter_conditions.xlsx 备份，Docker 镜像默认从它复制到 data 文件夹中
+```
 
-可用环境参数（Docker）
-参数	说明	默认值
-GITHUB_SEARCH_QUERY	搜索关键字，可以填写多个关键字（如：直播源,IPTV）	直播源
-GITHUB_SEARCH_DAYS	搜索天数，从当前日期向前推	25 天
-GITHUB_TOKEN	GitHub token，用于 API 访问	Your_GITHUB_TOKEN
-THREAD_LIMIT	多线程数，根据网络和设备性能自行调整	10
-HEIGHT_LIMIT	分辨率筛选（null 保存全部, 0 保存除 Unknown 外全部, 大于 0 的值不保存低于该值的分辨率）	null
-CODEC_EXCLUDE_LIST	排除的视频格式列表	Unknown
-LATENCY_LIMIT	延迟检测时间限制（建议在 5000-10000 ms 之间）	5000 ms
-RETRY_LIMIT	检测失败后的重试次数	1
-SCHEDULER_INTERVAL_MINUTES	定期检测间隔时间	30 分钟
-SEARCH_INTERVAL_DAYS	项目重启间隔天数	2 天
-/app/data	数据存储文件夹（用于存放下载和检测的直播源文件）	可映射到宿主机
+## Docker 环境参数
 
-生成的节目单下载地址
-http://127.0.0.1:5000/aggregated_channels.m3u8
-http://localhost:5000/aggregated_channels.m3u8
-网络选择: 建议选择 host 或 macvlan 模式，并启用 IPV6。
+| 参数 | 说明 | 默认值 |
+| ---- | ---- | ---- |
+| GITHUB_SEARCH_QUERY | 搜索关键字，可以填写多个关键字（如：直播源,IPTV） | 直播源 |
+| GITHUB_SEARCH_DAYS | 搜索天数，从当前日期向前推 | 25 天 |
+| GITHUB_TOKEN | GitHub token，用于 API 访问 | Your_GITHUB_TOKEN |
+| THREAD_LIMIT | 多线程数，根据网络和设备性能自行调整 | 10 |
+| HEIGHT_LIMIT | 分辨率筛选（null 保存全部, 0 保存除 Unknown 外全部, 大于 0 的值不保存低于该值的分辨率） | null |
+| CODEC_EXCLUDE_LIST | 排除的视频格式列表 | Unknown |
+| LATENCY_LIMIT | 延迟检测时间限制（建议在 5000-10000 ms 之间） | 5000 ms |
+| RETRY_LIMIT | 检测失败后的重试次数 | 1 |
+| SCHEDULER_INTERVAL_MINUTES | 定期检测间隔时间 | 30 分钟 |
+| SEARCH_INTERVAL_DAYS | 项目重启间隔天数 | 2 天 |
+| /app/data | 数据存储文件夹（用于存放下载和检测的直播源文件） | 可映射到宿主机 |
+
+## 生成的节目单下载地址
+
+- `http://127.0.0.1:5000/aggregated_channels.m3u8`
+- `http://localhost:5000/aggregated_channels.m3u8`
+
+## 网络选择
+
+建议选择 `host` 或 `macvlan` 模式，并启用 `IPV6`。
+
+---
