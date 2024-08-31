@@ -10,8 +10,17 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 def extract_text(line):
     """提取#EXTINF标签中的频道名称"""
-    match = re.search(r',(.*)', line)
-    return match.group(1).strip() if match else None
+    tvg_name_match = re.search(r'tvg-name="([^"]+)"', line)
+    group_title_match = re.search(r'group-title="([^"]+)"', line)
+    title_match = re.search(r',\s*([^,]+)$', line)
+
+    tvg_name = tvg_name_match.group(1).strip() if tvg_name_match else None
+    group_title = group_title_match.group(1).strip() if group_title_match else None
+    title = title_match.group(1).strip() if title_match else tvg_name  # 优先使用提取的 title，如果没有则使用 tvg_name
+
+    logging.debug(f"Extracted values: tvg_name={tvg_name}, group_title={group_title}, title={title}")
+
+    return tvg_name, group_title, title
 
 def similarity(a, b):
     """计算两个字符串的相似度"""
@@ -23,7 +32,7 @@ def match_tvg_name(text, sources):
 
     # 逐字匹配，记录所有可能的匹配
     for tvg_id, tvg_name, group_title, aliasesname, tvordero, tvg_logor in sources:
-        if tvg_name in text:
+        if tvg_name and tvg_name in text:  # 确保 tvg_name 不为 None
             potential_matches.append((tvg_id, tvg_name, group_title, aliasesname, tvordero, tvg_logor))
 
     # 如果有多个可能的匹配，进一步计算相似度
@@ -37,23 +46,6 @@ def match_tvg_name(text, sources):
 
     # 如果没有找到匹配，返回None
     return None
-
-def parse_line(line):
-    """解析每一行，确保正确分隔 title 和 url"""
-    parts = line.split(',', 1)  # 只分割一次，避免误分割
-    if len(parts) != 2:
-        logging.error(f"Invalid line format: {line}")
-        return None, None
-    
-    title = parts[0].strip()
-    url = parts[1].strip()
-
-    # 检查 URL 格式的有效性
-    if not (url.startswith("http://") or url.startswith("https://") or url.startswith("rtsp://")):
-        logging.error(f"Invalid URL format: {url}")
-        return None, None
-
-    return title, url
 
 def import_playlists():
     # 定义数据库文件路径
@@ -105,8 +97,9 @@ def import_playlists():
 
                     # 检查是否是#EXTINF开头的行
                     if line.startswith("#EXTINF"):
-                        title = extract_text(line)
-                        current_tvg_info = match_tvg_name(line, sources)
+                        tvg_name, group_title, title = extract_text(line)
+                        if tvg_name or title:
+                            current_tvg_info = match_tvg_name(tvg_name or title, sources)
 
                     # 处理没有#EXTINF标签，直接为“频道名称,URL”的行
                     elif ',' in line:
@@ -142,3 +135,4 @@ def import_playlists():
 
 if __name__ == "__main__":
     import_playlists()
+
