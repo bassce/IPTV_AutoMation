@@ -177,6 +177,13 @@ def run_tests():
     # 创建或替换只读表
     cursor.execute("DROP TABLE IF EXISTS filtered_playlists_readonly")
     cursor.execute("CREATE TABLE filtered_playlists_readonly AS SELECT * FROM filtered_playlists")
+    
+    # 更新元数据表的创建时间
+    cursor.execute('''
+    INSERT OR REPLACE INTO table_metadata (table_name, created_at)
+    VALUES ('filtered_playlists_readonly', datetime('now', 'localtime'))
+    ''')
+    
     conn.commit()
 
     df = pd.read_sql_query("SELECT * FROM filtered_playlists ORDER BY id", conn)

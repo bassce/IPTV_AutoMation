@@ -166,6 +166,12 @@ def run_tests():
     )
     ''')
 
+    # 插入或更新表的创建时间到元数据表中
+    cursor.execute('''
+    INSERT OR REPLACE INTO table_metadata (table_name, created_at)
+    VALUES ('filtered_playlists', datetime('now', 'localtime'))
+    ''')
+
     for result in results:
         cursor.execute('''
             UPDATE iptv_playlists

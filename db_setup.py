@@ -29,6 +29,14 @@ def import_excel_to_db(excel_file, db_file):
         conn = sqlite3.connect(db_file)
         cursor = conn.cursor()
 
+        # 创建元数据表，如果不存在则创建
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS table_metadata (
+            table_name TEXT PRIMARY KEY,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        ''')
+
         # 如果表存在，删除旧表
         cursor.execute('DROP TABLE IF EXISTS iptv_sources')
 
@@ -47,6 +55,12 @@ def import_excel_to_db(excel_file, db_file):
 
         # 将DataFrame中的数据插入到SQLite表中
         df.to_sql('iptv_sources', conn, if_exists='replace', index=False)
+
+        # 插入或更新表的创建时间到元数据表中
+        cursor.execute('''
+        INSERT OR REPLACE INTO table_metadata (table_name, created_at)
+        VALUES ('iptv_sources', datetime('now', 'localtime'))
+        ''')
 
         # 提交更改并关闭连接
         conn.commit()

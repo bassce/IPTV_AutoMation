@@ -3,10 +3,11 @@ import logging
 import json
 import os
 import psutil
+import sqlite3
+from datetime import datetime, timedelta
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
 
 # 读取配置文件
 def load_config():
@@ -39,10 +40,10 @@ def load_config():
         logging.error("config.json file not found.")
         raise
     except json.JSONDecodeError as e:
-        logging.error(f"Error parsing config.json: {e}")
+        logging.error(f"Error parsing config.json: %s", e)
         raise
     except Exception as e:
-        logging.error(f"Unexpected error loading config.json: {e}")
+        logging.error("Unexpected error loading config.json: %s", e)
         raise
 
 # 使用 load_config 函数加载配置
@@ -54,23 +55,80 @@ def kill_processes_by_names(names):
         if cmdline:  # 检查 cmdline 是否为 None
             for name in names:
                 if name in cmdline:
-                    logging.info(f"Killing process {proc.info['name']} with PID {proc.info['pid']}")
+                    logging.info("Killing process %s with PID %s", proc.info['name'], proc.info['pid'])
                     proc.kill()
 
+def table_exists(conn, table_name):
+    cursor = conn.cursor()
+    cursor.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table_name}';")
+    return cursor.fetchone() is not None
+
+def get_table_creation_time(table_name):
+    conn = sqlite3.connect("data/iptv_sources.db")
+    cursor = conn.cursor()
+
+    # 尝试从创建时间列读取
+    try:
+        cursor.execute(f"SELECT created_at FROM table_metadata WHERE table_name = ?", (table_name,))
+        result = cursor.fetchone()
+        if result:
+            return datetime.fromisoformat(result[0])
+        else:
+            logging.warning("No creation time found for table %s", table_name)
+            return None
+    except sqlite3.Error as e:
+        logging.error("Error getting creation time for table %s: %s", table_name, e)
+        return None
+    finally:
+        conn.close()
+
 async def run_subprocess(script_name):
-    logging.info(f"Starting {script_name}...")
+    logging.info("Starting %s...", script_name)
     try:
         process = await asyncio.create_subprocess_exec("python", script_name)
         await process.wait()  # 等待子进程完成
-        logging.info(f"Finished {script_name}.")
+        logging.info("Finished %s.", script_name)
     except Exception as e:
-        logging.error(f"Failed to run {script_name}: {e}")
+        logging.error("Failed to run %s: %s", script_name, e)
 
 async def run_daily_monitor():
     await run_subprocess("daily_monitor.py")
 
 async def run_flask_server():
     await run_subprocess("flask_server.py")
+
+async def check_and_run_flask():
+    conn = sqlite3.connect("data/iptv_sources.db")
+    cursor = conn.cursor()
+
+    if table_exists(conn, "filtered_playlists_readonly"):
+        creation_time = get_table_creation_time("filtered_playlists_readonly")
+        if creation_time:
+            time_diff = datetime.now() - creation_time
+            if time_diff > timedelta(hours=24):
+                logging.info("filtered_playlists_readonly table is older than 24 hours, running daily_monitor.py first.")
+                await run_daily_monitor()
+        else:
+            logging.warning("filtered_playlists_readonly table exists, but creation time not found. Deleting the table.")
+            cursor.execute("DROP TABLE IF EXISTS filtered_playlists_readonly")
+            conn.commit()
+
+            logging.info("Running daily_monitor.py to recreate filtered_playlists_readonly table.")
+            await run_daily_monitor()
+
+            # 在重新生成表后，检查表是否存在
+            if not table_exists(conn, "filtered_playlists_readonly"):
+                logging.error("Failed to create filtered_playlists_readonly table, cannot start flask_server.")
+                return
+
+    else:
+        # 如果表不存在，执行daily_monitor以生成表
+        logging.info("filtered_playlists_readonly table does not exist, running daily_monitor.py to create it.")
+        await run_daily_monitor()
+
+    # 确保表存在后再启动flask_server
+    await run_flask_server()
+    conn.close()
 
 async def run_scheduler_tasks():
     logging.info("Starting database initialization (db_setup.py)...")
@@ -83,8 +141,10 @@ async def run_scheduler_tasks():
     logging.info("Starting ffmpeg_source_checker.py...")
     await run_subprocess("ffmpeg_source_checker.py")
 
-    logging.info("Starting flask_server.py and initial daily_monitor.py...")
+    logging.info("Stopping flask_server.py and daily_monitor.py if running...")
     kill_processes_by_names(["flask_server.py", "daily_monitor.py"])
+
+    logging.info("Restarting daily_monitor.py and flask_server.py...")
     await run_daily_monitor()
     await run_flask_server()
 
@@ -94,9 +154,10 @@ async def schedule_daily_monitor(interval_minutes):
         await run_daily_monitor()
 
 def run_scheduler():
-    loop = asyncio.get_event_loop()
+    loop = asyncio.new_event_loop()  # 创建新的事件循环以避免旧的弃用警告
+    asyncio.set_event_loop(loop)
     tasks = [
-        run_scheduler_tasks(),
+        check_and_run_flask(),  # 检查表的存在性并执行相应的操作
         schedule_daily_monitor(config['scheduler']['interval_minutes'])
     ]
 

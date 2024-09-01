@@ -57,6 +57,14 @@ def import_playlists():
         conn = sqlite3.connect(db_file)
         cursor = conn.cursor()
 
+        # 创建元数据表，如果不存在则创建
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS table_metadata (
+            table_name TEXT PRIMARY KEY,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        ''')
+
         # 清空旧数据
         cursor.execute('DROP TABLE IF EXISTS iptv_playlists')
 
@@ -77,6 +85,12 @@ def import_playlists():
             format TEXT,
             UNIQUE(url)  -- 添加唯一约束，防止重复
         )
+        ''')
+
+        # 插入或更新表的创建时间到元数据表中
+        cursor.execute('''
+        INSERT OR REPLACE INTO table_metadata (table_name, created_at)
+        VALUES ('iptv_playlists', datetime('now', 'localtime'))
         ''')
 
         # 获取所有的TV源数据
@@ -135,4 +149,3 @@ def import_playlists():
 
 if __name__ == "__main__":
     import_playlists()
-
