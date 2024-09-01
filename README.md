@@ -41,14 +41,15 @@ iptv_automation/
 | ---- | ---- | ---- |
 | GITHUB_SEARCH_QUERY | 搜索关键字，可以填写多个关键字（如：直播源,IPTV） | 直播源 |
 | GITHUB_SEARCH_DAYS | 搜索天数，从当前日期向前推 | 25 天 |
-| GITHUB_TOKEN | GitHub token，用于 API 访问 | Your_GITHUB_TOKEN |
+| GITHUB_TOKEN | GitHub token，用于 API 访问 |   |
 | THREAD_LIMIT | 多线程数，根据网络和设备性能自行调整 | 10 |
 | HEIGHT_LIMIT | 分辨率筛选（null 保存全部, 0 保存除 Unknown 外全部, 大于 0 的值不保存低于该值的分辨率） | null |
-| CODEC_EXCLUDE_LIST | 排除的视频格式列表 | Unknown |
+| CODEC_EXCLUDE_LIST | 排除的视频格式列表，Unknown即排除检测不出分辨率的源 | Unknown |
 | LATENCY_LIMIT | 延迟检测时间限制（建议在 5000-10000 ms 之间） | 5000 ms |
 | RETRY_LIMIT | 检测失败后的重试次数 | 1 |
 | SCHEDULER_INTERVAL_MINUTES | 定期检测间隔时间 | 30 分钟 |
 | SEARCH_INTERVAL_DAYS | 项目重启间隔天数 | 2 天 |
+| HOST_IP | docker主机的ip，用于更新aggregated_channels.m3u8中的网址 |   |
 | /app/data | 数据存储文件夹（用于存放下载和检测的直播源文件） | 可映射到宿主机 |
 
 ## 生成的节目单下载地址
