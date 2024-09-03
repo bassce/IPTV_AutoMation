@@ -7,7 +7,7 @@ import sqlite3
 from datetime import datetime, timedelta
 
 # 配置日志
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(asctime)s - %(message)s')
 
 # 读取配置文件
 def load_config():
@@ -31,9 +31,11 @@ def load_config():
         config['source_checker']['retry_limit'] = int(os.getenv('RETRY_LIMIT', config['source_checker']['retry_limit']))
 
         config['scheduler']['interval_minutes'] = int(os.getenv('SCHEDULER_INTERVAL_MINUTES', config['scheduler']['interval_minutes']))
+        config['scheduler']['failed_sources_cleanup_days'] = int(os.getenv('FAILED_SOURCES_CLEANUP_DAYS', config['scheduler']['failed_sources_cleanup_days']))
+        config['scheduler']['ffmpeg_check_frequency_hours'] = int(os.getenv('FFMPEG_CHECK_FREQUENCY_HOURS', config['scheduler']['ffmpeg_check_frequency_hours']))
 
         # 新增读取 host_ip 环境变量
-        config['host_ip'] = os.getenv('HOST_IP', config.get('host_ip', 'localhost'))
+        config['network']['host_ip'] = os.getenv('HOST_IP', config.get('network', {}).get('host_ip', 'localhost'))
         
         return config
     except FileNotFoundError:
@@ -67,7 +69,6 @@ def get_table_creation_time(table_name):
     conn = sqlite3.connect("data/iptv_sources.db")
     cursor = conn.cursor()
 
-    # 尝试从创建时间列读取
     try:
         cursor.execute(f"SELECT created_at FROM table_metadata WHERE table_name = ?", (table_name,))
         result = cursor.fetchone()
@@ -97,11 +98,49 @@ async def run_daily_monitor():
 async def run_flask_server():
     await run_subprocess("flask_server.py")
 
+async def run_ffmpeg_source_checker():
+    await run_subprocess("ffmpeg_source_checker.py")
+
+async def clean_failed_sources():
+    conn = sqlite3.connect("data/iptv_sources.db")
+    cursor = conn.cursor()
+
+    try:
+        cutoff_date = datetime.now() - timedelta(days=config['scheduler']['failed_sources_cleanup_days'])
+        cursor.execute("DELETE FROM iptv_playlists WHERE last_failed_date IS NOT NULL AND last_failed_date < ?", (cutoff_date,))
+        conn.commit()
+        logging.info("Cleaned up failed sources older than %d days.", config['scheduler']['failed_sources_cleanup_days'])
+    except sqlite3.Error as e:
+        logging.error("Failed to clean up failed sources: %s", e)
+    finally:
+        conn.close()
+
 async def check_and_run_flask():
     conn = sqlite3.connect("data/iptv_sources.db")
     cursor = conn.cursor()
 
-    if table_exists(conn, "filtered_playlists_readonly"):
+    filtered_exists = table_exists(conn, "filtered_playlists")
+    readonly_exists = table_exists(conn, "filtered_playlists_readonly")
+
+    if filtered_exists and not readonly_exists:
+        creation_time = get_table_creation_time("filtered_playlists")
+        if creation_time:
+            time_diff = datetime.now() - creation_time
+            if time_diff < timedelta(hours=24):
+                logging.info("filtered_playlists exists and is less than 24 hours old. Running daily_monitor.py to create filtered_playlists_readonly.")
+                await run_daily_monitor()
+            else:
+                logging.info("filtered_playlists exists and is older than 24 hours. Running run_scheduler_tasks to reinitialize.")
+                await run_scheduler_tasks()
+        else:
+            logging.warning("filtered_playlists table exists, but creation time not found. Initializing the project.")
+            await run_scheduler_tasks()
+
+    elif not filtered_exists and not readonly_exists:
+        logging.info("Neither filtered_playlists nor filtered_playlists_readonly tables exist, initializing the project.")
+        await run_scheduler_tasks()
+
+    if readonly_exists:
         creation_time = get_table_creation_time("filtered_playlists_readonly")
         if creation_time:
             time_diff = datetime.now() - creation_time
@@ -120,11 +159,6 @@ async def check_and_run_flask():
             if not table_exists(conn, "filtered_playlists_readonly"):
                 logging.error("Failed to create filtered_playlists_readonly table, cannot start flask_server.")
                 return
-
-    else:
-        # 如果表不存在，执行daily_monitor以生成表
-        logging.info("filtered_playlists_readonly table does not exist, running daily_monitor.py to create it.")
-        await run_daily_monitor()
 
     # 确保表存在后再启动flask_server
     await run_flask_server()
@@ -153,12 +187,36 @@ async def schedule_daily_monitor(interval_minutes):
         await asyncio.sleep(interval_minutes * 60)
         await run_daily_monitor()
 
+        # 检查 flask_server.py 是否正在运行
+        result = subprocess.run(['pgrep', '-f', 'flask_server.py'], stdout=subprocess.PIPE)
+        if result.stdout:
+            # 如果已经在运行，先杀掉再重新启动
+            subprocess.run(['pkill', '-f', 'flask_server.py'])
+            logging.info("Flask server stopped. Restarting...")
+            await run_flask_server()
+        else:
+            # 如果没有运行，则直接启动
+            logging.info("Flask server not running. Starting...")
+            await run_flask_server()
+
+async def schedule_ffmpeg_check():
+    while True:
+        await asyncio.sleep(config['scheduler']['ffmpeg_check_frequency_hours'] * 3600)
+        await run_ffmpeg_source_checker()
+
+async def schedule_failed_sources_cleanup():
+    while True:
+        await asyncio.sleep(config['scheduler']['failed_sources_cleanup_days'] * 86400)
+        await clean_failed_sources()
+
 def run_scheduler():
     loop = asyncio.new_event_loop()  # 创建新的事件循环以避免旧的弃用警告
     asyncio.set_event_loop(loop)
     tasks = [
         check_and_run_flask(),  # 检查表的存在性并执行相应的操作
-        schedule_daily_monitor(config['scheduler']['interval_minutes'])
+        schedule_daily_monitor(config['scheduler']['interval_minutes']),
+        schedule_ffmpeg_check(),
+        schedule_failed_sources_cleanup()
     ]
 
     loop.run_until_complete(asyncio.gather(*tasks))

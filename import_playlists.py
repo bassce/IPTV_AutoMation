@@ -68,7 +68,7 @@ def import_playlists():
         # 清空旧数据
         cursor.execute('DROP TABLE IF EXISTS iptv_playlists')
 
-        # 创建新的表结构
+        # 创建新的表结构，添加 failure_count 和 last_failed_date 列
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS iptv_playlists (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -83,6 +83,8 @@ def import_playlists():
             latency INTEGER,
             resolution TEXT,
             format TEXT,
+            failure_count INTEGER DEFAULT 0,  -- 新增：检测失败次数，默认值为 0
+            last_failed_date TIMESTAMP DEFAULT 0,  -- 新增：最后一次检测失败的日期时间，初始为空
             UNIQUE(url)  -- 添加唯一约束，防止重复
         )
         ''')
@@ -124,16 +126,16 @@ def import_playlists():
                         if current_tvg_info:
                             tvg_id, tvg_name, group_title, aliasesname, tvordero, tvg_logor = current_tvg_info
                             cursor.execute('''
-                            INSERT OR IGNORE INTO iptv_playlists (tvg_id, tvg_name, group_title, aliasesname, tvordero, tvg_logor, title, url)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                            INSERT OR IGNORE INTO iptv_playlists (tvg_id, tvg_name, group_title, aliasesname, tvordero, tvg_logor, title, url, failure_count, last_failed_date)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0)
                             ''', (tvg_id, tvg_name, group_title, aliasesname, tvordero, tvg_logor, title, url))
 
                     # 处理URL行
                     elif current_tvg_info and line and not line.startswith("#"):
                         tvg_id, tvg_name, group_title, aliasesname, tvordero, tvg_logor = current_tvg_info
                         cursor.execute('''
-                        INSERT OR IGNORE INTO iptv_playlists (tvg_id, tvg_name, group_title, aliasesname, tvordero, tvg_logor, title, url)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        INSERT OR IGNORE INTO iptv_playlists (tvg_id, tvg_name, group_title, aliasesname, tvordero, tvg_logor, title, url, failure_count, last_failed_date)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0)
                         ''', (tvg_id, tvg_name, group_title, aliasesname, tvordero, tvg_logor, title, line))
 
         # 提交更改

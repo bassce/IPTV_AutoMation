@@ -3,6 +3,7 @@ import json
 import subprocess
 import logging
 import concurrent.futures
+import threading
 from calculate_score import calculate_score  # 导入 calculate_score 函数
 
 # 配置日志
@@ -33,6 +34,9 @@ LATENCY_LIMIT = config['source_checker']['latency_limit'] / 1000  # 转换为秒
 HEIGHT_LIMIT = config['source_checker']['height_limit']
 CODEC_EXCLUDE_LIST = config['source_checker']['codec_exclude_list']
 RETRY_LIMIT = config['source_checker']['retry_limit']  # 重试次数
+FAILURE_THRESHOLD = config['source_checker']['failure_threshold']  # 最大失败次数阈值
+
+lock = threading.Lock()
 
 def get_video_info(url):
     command = [
@@ -69,7 +73,6 @@ def test_stream(source):
             latency = 0  # 默认值，实际值在 daily_monitor.py 中检测
             download_speed = 0.0  # 默认值，实际值在 daily_monitor.py 中检测
 
-            # 计算评分后进行四舍五入处理
             score = round(calculate_score(resolution, format, latency, download_speed, stability, success_rate), 4)
 
             if HEIGHT_LIMIT is not None:
@@ -98,9 +101,9 @@ def test_stream(source):
                 "tvg_logor": source["tvg_logor"],
                 "title": source["title"],
                 "id": source["id"],
-                "latency": latency,  # 默认值
-                "download_speed": download_speed,  # 默认值
-                "score": score  # 确保这个值是浮点数
+                "latency": latency,
+                "download_speed": download_speed,
+                "score": score
             }
 
         except Exception as e:
@@ -114,41 +117,26 @@ def run_tests():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
-    # 清空 iptv_playlists 表中的 resolution 和 format 列
-    cursor.execute('UPDATE iptv_playlists SET resolution = NULL, format = NULL')
-    conn.commit()
-
-    cursor.execute('SELECT id, tvg_id, tvg_name, group_title, aliasesname, tvordero, tvg_logor, title, url FROM iptv_playlists')
-    sources = cursor.fetchall()
-
-    results = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=THREAD_LIMIT) as executor:
-        future_to_url = {executor.submit(test_stream, {
-            "id": source[0],
-            "tvg_id": source[1],
-            "tvg_name": source[2],
-            "group_title": source[3],
-            "aliasesname": source[4],
-            "tvordero": source[5],
-            "tvg_logor": source[6],
-            "title": source[7],
-            "url": source[8]
-        }): source for source in sources}
-
-        for future in concurrent.futures.as_completed(future_to_url):
-            result = future.result()
-            if result:
-                results.append(result)
-
-    # 按照 tvordero 从小到大排序
-    results.sort(key=lambda x: x["tvordero"])
-
-    # 删除现有的 filtered_playlists 表（如果存在）
-    cursor.execute('DROP TABLE IF EXISTS filtered_playlists')
-
-    # 创建新的 filtered_playlists 表，包括评分列
+    # 新建 failed_sources 表
     cursor.execute('''
-    CREATE TABLE filtered_playlists (
+    CREATE TABLE IF NOT EXISTS failed_sources (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tvg_id TEXT,
+        tvg_name TEXT,
+        group_title TEXT,
+        aliasesname TEXT,
+        tvordero INTEGER,
+        tvg_logor TEXT,
+        title TEXT,
+        url TEXT,
+        failure_count INTEGER,
+        last_failed_date TIMESTAMP
+    )
+    ''')
+
+    # 检查 filtered_playlists 表是否存在，不存在则创建
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS filtered_playlists (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         tvg_id TEXT,
         tvg_name TEXT,
@@ -162,20 +150,82 @@ def run_tests():
         resolution TEXT,
         format TEXT,
         download_speed FLOAT,
-        score FLOAT
+        score FLOAT,
+        failure_count INTEGER DEFAULT 0,
+        last_failed_date TIMESTAMP DEFAULT 0
     )
     ''')
 
-    # 插入或更新表的创建时间到元数据表中
     cursor.execute('''
     INSERT OR REPLACE INTO table_metadata (table_name, created_at)
     VALUES ('filtered_playlists', datetime('now', 'localtime'))
     ''')
 
+    # 仅选择 last_failed_date 不为空的直播源进行检测
+    cursor.execute('''
+    SELECT id, tvg_id, tvg_name, group_title, aliasesname, tvordero, tvg_logor, title, url, failure_count
+    FROM iptv_playlists
+    WHERE last_failed_date IS NOT NULL
+    ''')
+    sources = cursor.fetchall()
+
+    results = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=THREAD_LIMIT) as executor:
+        future_to_url = {executor.submit(test_stream, {
+            "id": source[0],
+            "tvg_id": source[1],
+            "tvg_name": source[2],
+            "group_title": source[3],
+            "aliasesname": source[4],
+            "tvordero": source[5],
+            "tvg_logor": source[6],
+            "title": source[7],
+            "url": source[8],
+            "failure_count": source[9]
+        }): source for source in sources}
+
+        for future in concurrent.futures.as_completed(future_to_url):
+            result = future.result()
+            if result:
+                # 插入到 filtered_playlists 表之前检查 URL 是否已存在
+                cursor.execute('''
+                    SELECT 1 FROM filtered_playlists WHERE url = ?
+                ''', (result['url'],))
+                exists = cursor.fetchone()
+
+                if not exists:
+                    results.append(result)
+                else:
+                    logging.info(f"Skipping duplicate URL: {result['url']}")
+            else:
+                source_id = future_to_url[future][0]
+                cursor.execute('''
+                UPDATE iptv_playlists
+                SET failure_count = failure_count + 1, last_failed_date = datetime('now', 'localtime')
+                WHERE id = ?
+                ''', (source_id,))
+
+                cursor.execute('SELECT failure_count FROM iptv_playlists WHERE id = ?', (source_id,))
+                failure_count = cursor.fetchone()[0]
+
+                if failure_count >= FAILURE_THRESHOLD:
+                    cursor.execute('''
+                    INSERT INTO failed_sources (tvg_id, tvg_name, group_title, aliasesname, tvordero, tvg_logor, title, url, failure_count, last_failed_date)
+                    SELECT tvg_id, tvg_name, group_title, aliasesname, tvordero, tvg_logor, title, url, failure_count, last_failed_date
+                    FROM iptv_playlists
+                    WHERE id = ?
+                    ''', (source_id,))
+                    cursor.execute('DELETE FROM iptv_playlists WHERE id = ?', (source_id,))
+                    logging.info(f"Source {source_id} moved to failed_sources due to exceeding failure threshold.")
+
+    # 按照 tvordero 从小到大排序
+    results.sort(key=lambda x: x["tvordero"])
+
+    # 插入结果到 filtered_playlists 表
     for result in results:
         cursor.execute('''
             UPDATE iptv_playlists
-            SET resolution = ?, format = ?
+            SET resolution = ?, format = ?, failure_count = 0, last_failed_date = NULL
             WHERE id = ?
         ''', (result["resolution"], result["format"], result["id"]))
 

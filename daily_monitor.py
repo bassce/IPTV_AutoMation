@@ -8,7 +8,9 @@ import pandas as pd
 import concurrent.futures
 import aiohttp
 import asyncio
-from calculate_score import calculate_score, initialize_stability_and_success_rate, update_stability_and_success_rate  # 引入评分机制及相关函数
+import os
+import threading  # 引入 threading 模块
+from calculate_score import calculate_score, update_stability_and_success_rate  # 引入评分机制及相关函数
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -39,6 +41,10 @@ DB_PATH = 'data/iptv_sources.db'
 THREADS = config['source_checker']['thread_limit']
 LATENCY_LIMIT = config['source_checker']['latency_limit'] / 1000  # 以秒为单位
 RETRY_LIMIT = config['source_checker']['retry_limit']  # 重试次数
+FAILURE_THRESHOLD = config['source_checker']['failure_threshold']  # 最大失败次数阈值
+
+# 创建全局锁对象
+lock = threading.Lock()
 
 def convert_to_kb(size, unit):
     size = float(size)
@@ -107,86 +113,140 @@ def get_stream_info(url, duration, threads=THREADS):
         logging.error(f"Error processing stream {url}: {e}")
         return {"download_speed": 0}
 
-def test_stream(source):
+def handle_failed_stream(source, cursor):
+    with lock:  # 加锁，确保数据库操作是线程安全的
+        try:
+            # 将需要移动的直播源直接移动到 iptv_playlists 表中
+            cursor.execute('''
+            UPDATE iptv_playlists 
+            SET failure_count = failure_count + 1, last_failed_date = datetime('now', 'localtime')
+            WHERE url = ? AND tvg_name = ?
+            ''', (source['url'], source['tvg_name']))
+
+            # 从 filtered_playlists 表中删除这些记录
+            cursor.execute('''
+            DELETE FROM filtered_playlists WHERE id = ?
+            ''', (source['id'],))
+
+            logging.info(f"Source {source['id']} moved to iptv_playlists due to exceeding failure threshold.")
+            
+        except sqlite3.OperationalError as e:
+            logging.error(f"Database operation failed: {e}")
+
+def test_stream(source, cursor):
     url = source["url"]
-    latency = asyncio.run(check_latency(url))
-    if latency is None or latency > LATENCY_LIMIT * 1000:
-        logging.info(f"Skipping source due to high latency ({latency} ms): {url}")
-        return None
+    retries = 0
 
-    # 获取之前的评分（包含固定的分辨率和格式评分，以及之前累积的评分）
-    previous_score = source.get("score", 0)
-    stability = source.get("stability", 0.9)
-    success_rate = source.get("success_rate", 0.95)
+    while retries < RETRY_LIMIT:
+        latency = asyncio.run(check_latency(url))
+        if latency is None or latency > LATENCY_LIMIT * 1000:
+            retries += 1
+            logging.info(f"Retrying source due to high latency ({latency} ms): {url} ({retries}/{RETRY_LIMIT})")
+            continue
 
-    # 获取下载速度
-    download_info = get_stream_info(url, LATENCY_LIMIT)
-    logging.info(f"Stream OK: {url} | Latency: {latency} ms | Download Speed: {download_info['download_speed']} KB/s")
+        previous_score = source.get("score", 0)
+        stability = source.get("stability", 0.9)
+        success_rate = source.get("success_rate", 0.95)
 
-    # 检测是否成功
-    success = download_info["download_speed"] > 0
+        download_info = get_stream_info(url, LATENCY_LIMIT)
+        logging.info(f"Stream OK: {url} | Latency: {latency} ms | Download Speed: {download_info['download_speed']} KB/s")
 
-    # 更新稳定性和成功率
-    stability, success_rate = update_stability_and_success_rate(stability, success_rate, success)
+        # 如果下载速度为0，则认为检测失败
+        if download_info["download_speed"] > 0:
+            stability, success_rate = update_stability_and_success_rate(stability, success_rate, True)
+            updated_score = calculate_score(
+                resolution_value=source.get("resolution_value", None),
+                format=source.get("format", None),
+                latency=latency / 1000,
+                download_speed=download_info["download_speed"] / 1024,
+                stability=stability,
+                success_rate=success_rate,
+                previous_score=previous_score
+            )
 
-    # 使用calculate_score进行评分更新，综合处理
-    updated_score = calculate_score(
-        resolution_value=source.get("resolution_value", None),  # 累积的分辨率评分
-        format=source.get("format", None),                     # 累积的视频格式评分
-        latency=latency / 1000,  # 将延迟转换为秒
-        download_speed=download_info["download_speed"] / 1024,  # 将下载速度转换为 Mbps
-        stability=stability,          # 使用累积的稳定性
-        success_rate=success_rate,      # 使用累积的成功率
-        previous_score=previous_score  # 传递已有的评分进行累积
-    )
+            return {
+                "id": source["id"],
+                "latency": latency,
+                "download_speed": download_info["download_speed"],
+                "stability": stability,
+                "success_rate": success_rate,
+                "score": updated_score
+            }
+        else:
+            retries += 1
+            logging.info(f"Retrying source due to low download speed ({download_info['download_speed']} KB/s): {url} ({retries}/{RETRY_LIMIT})")
 
-    return {
-        "id": source["id"],
-        "latency": latency,
-        "download_speed": download_info["download_speed"],
-        "stability": stability,
-        "success_rate": success_rate,
-        "score": updated_score  # 返回最终累积评分
-    }
+    # 超过重试次数仍然失败，返回None
+    logging.info(f"Source failed after {RETRY_LIMIT} attempts: {url}")
+    return None
 
 def run_tests():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=10)  # 设置超时时间为10秒
     cursor = conn.cursor()
 
-    # 先清空延迟和下载速度的旧数据
-    cursor.execute('UPDATE filtered_playlists SET latency = NULL, download_speed = NULL')
-    conn.commit()
+    try:
+        # 先清空延迟和下载速度的旧数据
+        cursor.execute('UPDATE filtered_playlists SET latency = NULL, download_speed = NULL')
+        conn.commit()
 
-    # 选择直播源进行测试
-    cursor.execute('SELECT id, url, score FROM filtered_playlists')  # 获取 id, url, score 字段
-    sources = cursor.fetchall()
+        # 选择直播源进行测试
+        cursor.execute('SELECT id, url, score FROM filtered_playlists')
+        sources = cursor.fetchall()
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=THREADS) as executor:
-        results = list(executor.map(test_stream, [{"id": source[0], "url": source[1], "score": source[2]} for source in sources]))
+        results = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=THREADS) as executor:
+            results = list(executor.map(lambda src: test_stream(src, cursor), [{"id": source[0], "url": source[1], "score": source[2]} for source in sources]))
 
-    for result in results:
-        if result:
-            cursor.execute('''
+        for index, result in enumerate(results):
+            source_id = sources[index][0]  # 获取原始 source 的 id
+            if result:
+                # 检测成功，更新 latency、download_speed、score，并清除 last_failed_date 和 failure_count
+                cursor.execute('''
+                    UPDATE filtered_playlists
+                    SET latency = ?, download_speed = ?, score = ?, failure_count = 0, last_failed_date = NULL
+                    WHERE id = ?
+                ''', (result["latency"], result["download_speed"], result["score"], result["id"]))
+            else:
+                # 检测失败，更新 last_failed_date 和 failure_count
+                cursor.execute('''
                 UPDATE filtered_playlists
-                SET latency = ?, download_speed = ?, score = ?
+                SET failure_count = failure_count + 1, last_failed_date = datetime('now', 'localtime')
                 WHERE id = ?
-            ''', (result["latency"], result["download_speed"], result["score"], result["id"]))
+                ''', (source_id,))
 
-    conn.commit()
+                # 检查 failure_count 是否达到阈值
+                cursor.execute('SELECT failure_count FROM filtered_playlists WHERE id = ?', (source_id,))
+                failure_count = cursor.fetchone()[0]
 
-    # 创建或替换只读表
-    cursor.execute("DROP TABLE IF EXISTS filtered_playlists_readonly")
-    cursor.execute("CREATE TABLE filtered_playlists_readonly AS SELECT * FROM filtered_playlists")
-    
-    # 更新元数据表的创建时间
-    cursor.execute('''
-    INSERT OR REPLACE INTO table_metadata (table_name, created_at)
-    VALUES ('filtered_playlists_readonly', datetime('now', 'localtime'))
-    ''')
-    
-    conn.commit()
+                if failure_count >= FAILURE_THRESHOLD:
+                    # 获取源的 url 和 tvg_name
+                    cursor.execute('SELECT url, tvg_name FROM filtered_playlists WHERE id = ?', (source_id,))
+                    url, tvg_name = cursor.fetchone()
 
-    df = pd.read_sql_query("SELECT * FROM filtered_playlists ORDER BY id", conn)
+                    handle_failed_stream({"id": source_id, "url": url, "tvg_name": tvg_name}, cursor)
+
+        # 创建或替换只读表
+        cursor.execute("DROP TABLE IF EXISTS filtered_playlists_readonly")
+        cursor.execute("CREATE TABLE filtered_playlists_readonly AS SELECT * FROM filtered_playlists")
+        
+        # 更新元数据表的创建时间
+        cursor.execute('''
+        INSERT OR REPLACE INTO table_metadata (table_name, created_at)
+        VALUES ('filtered_playlists_readonly', datetime('now', 'localtime'))
+        ''')
+
+        conn.commit()  # 确保更改被提交
+
+        logging.info("filtered_playlists_readonly table creation time recorded successfully.")
+
+        # 在关闭数据库连接之前读取数据
+        df = pd.read_sql_query("SELECT * FROM filtered_playlists ORDER BY id", conn)
+
+    finally:
+        # 关闭数据库连接
+        conn.close()
+
+    # 数据处理和生成Excel、M3U8文件
     df['download_speed'] = pd.to_numeric(df['download_speed'], errors='coerce').fillna(0)
 
     def highlight_speed(cell):
@@ -211,7 +271,6 @@ def run_tests():
             f.write(f'#EXTINF:-1,{row["title"]}\n')
             f.write(f'{row["url"]}\n')
 
-    conn.close()
     logging.info("Testing completed, results saved, and files generated.")
 
 if __name__ == "__main__":
