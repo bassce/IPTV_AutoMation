@@ -5,6 +5,7 @@ import os
 import psutil
 import sqlite3
 from datetime import datetime, timedelta
+import subprocess
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(asctime)s - %(message)s')
@@ -32,7 +33,7 @@ def load_config():
 
         config['scheduler']['interval_minutes'] = int(os.getenv('SCHEDULER_INTERVAL_MINUTES', config['scheduler']['interval_minutes']))
         config['scheduler']['failed_sources_cleanup_days'] = int(os.getenv('FAILED_SOURCES_CLEANUP_DAYS', config['scheduler']['failed_sources_cleanup_days']))
-        config['scheduler']['ffmpeg_check_frequency_hours'] = int(os.getenv('FFMPEG_CHECK_FREQUENCY_HOURS', config['scheduler']['ffmpeg_check_frequency_hours']))
+        config['scheduler']['ffmpeg_check_frequency_minutes'] = int(os.getenv('ffmpeg_check_frequency_minutes', config['scheduler']['ffmpeg_check_frequency_minutes']))
 
         # 新增读取 host_ip 环境变量
         config['network']['host_ip'] = os.getenv('HOST_IP', config.get('network', {}).get('host_ip', 'localhost'))
@@ -107,7 +108,7 @@ async def clean_failed_sources():
 
     try:
         cutoff_date = datetime.now() - timedelta(days=config['scheduler']['failed_sources_cleanup_days'])
-        cursor.execute("DELETE FROM iptv_playlists WHERE last_failed_date IS NOT NULL AND last_failed_date < ?", (cutoff_date,))
+        cursor.execute("DELETE FROM failed_sources WHERE last_failed_date IS NOT NULL AND last_failed_date < ?", (cutoff_date,))
         conn.commit()
         logging.info("Cleaned up failed sources older than %d days.", config['scheduler']['failed_sources_cleanup_days'])
     except sqlite3.Error as e:
@@ -165,6 +166,9 @@ async def check_and_run_flask():
     conn.close()
 
 async def run_scheduler_tasks():
+    logging.info("Cleaning up old failed sources before starting other tasks...")
+    await clean_failed_sources()  # 添加清理任务，确保导入前的清理
+
     logging.info("Starting database initialization (db_setup.py)...")
     await run_subprocess("db_setup.py")
 
@@ -181,6 +185,7 @@ async def run_scheduler_tasks():
     logging.info("Restarting daily_monitor.py and flask_server.py...")
     await run_daily_monitor()
     await run_flask_server()
+
 
 async def schedule_daily_monitor(interval_minutes):
     while True:
@@ -201,7 +206,7 @@ async def schedule_daily_monitor(interval_minutes):
 
 async def schedule_ffmpeg_check():
     while True:
-        await asyncio.sleep(config['scheduler']['ffmpeg_check_frequency_hours'] * 3600)
+        await asyncio.sleep(config['scheduler']['ffmpeg_check_frequency_minutes'] * 60)
         await run_ffmpeg_source_checker()
 
 async def schedule_failed_sources_cleanup():

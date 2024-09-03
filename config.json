@@ -10,13 +10,13 @@
     "codec_exclude_list": ["Unknown"],
     "latency_limit": 5000,
     "retry_limit": 1,
-	  "failure_threshold": 3
+	  "failure_threshold": 12
   },
   "scheduler": {
     "interval_minutes": 30,
     "search_interval_days": 2,
     "failed_sources_cleanup_days": 20,
-    "ffmpeg_check_frequency_hours": 6
+    "ffmpeg_check_frequency_minutes": 360
   },
   "network": {
     "host_ip": "127.0.0.1"

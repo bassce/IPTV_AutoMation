@@ -52,7 +52,7 @@ iptv_automation/
 | HOST_IP | docker主机的ip，用于更新aggregated_channels.m3u8中的网址 |   |
 | FAILURE_THRESHOLD | 直播源定期检测允许失败的次数 | 12 |
 | FAILED_SOURCES_CLEANUP_DAYS | 定时清理检测失败列表的天数 | 20 |
-| FFMPEG_CHECK_FREQUENCY_HOURS | 设定检测直播源可用情况（初检）的频率（小时） | 6 |
+| ffmpeg_check_frequency_minutes | 设定检测直播源可用情况（初检）的频率（分钟） | 360 |
 | /app/data | 数据存储文件夹（用于存放下载和检测的直播源文件） | 可映射到宿主机 |
 
 

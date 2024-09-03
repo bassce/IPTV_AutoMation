@@ -57,6 +57,16 @@ def import_playlists():
         conn = sqlite3.connect(db_file)
         cursor = conn.cursor()
 
+        # 检查 failed_sources 表是否存在
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='failed_sources'")
+        failed_sources_exists = cursor.fetchone() is not None
+
+        # 获取 failed_sources 中的所有 name 和 url 组合
+        failed_sources_set = set()
+        if failed_sources_exists:
+            cursor.execute('SELECT title, url FROM failed_sources')
+            failed_sources_set = set(cursor.fetchall())
+
         # 创建元数据表，如果不存在则创建
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS table_metadata (
@@ -124,19 +134,23 @@ def import_playlists():
                         url = parts[1].strip()
                         current_tvg_info = match_tvg_name(title, sources)
                         if current_tvg_info:
+                            # 检查是否在 failed_sources 中
+                            if (title, url) not in failed_sources_set:
+                                tvg_id, tvg_name, group_title, aliasesname, tvordero, tvg_logor = current_tvg_info
+                                cursor.execute('''
+                                INSERT OR IGNORE INTO iptv_playlists (tvg_id, tvg_name, group_title, aliasesname, tvordero, tvg_logor, title, url, failure_count, last_failed_date)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0)
+                                ''', (tvg_id, tvg_name, group_title, aliasesname, tvordero, tvg_logor, title, url))
+
+                    # 处理URL行
+                    elif current_tvg_info and line and not line.startswith("#"):
+                        # 检查是否在 failed_sources 中
+                        if (title, line) not in failed_sources_set:
                             tvg_id, tvg_name, group_title, aliasesname, tvordero, tvg_logor = current_tvg_info
                             cursor.execute('''
                             INSERT OR IGNORE INTO iptv_playlists (tvg_id, tvg_name, group_title, aliasesname, tvordero, tvg_logor, title, url, failure_count, last_failed_date)
                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0)
-                            ''', (tvg_id, tvg_name, group_title, aliasesname, tvordero, tvg_logor, title, url))
-
-                    # 处理URL行
-                    elif current_tvg_info and line and not line.startswith("#"):
-                        tvg_id, tvg_name, group_title, aliasesname, tvordero, tvg_logor = current_tvg_info
-                        cursor.execute('''
-                        INSERT OR IGNORE INTO iptv_playlists (tvg_id, tvg_name, group_title, aliasesname, tvordero, tvg_logor, title, url, failure_count, last_failed_date)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0)
-                        ''', (tvg_id, tvg_name, group_title, aliasesname, tvordero, tvg_logor, title, line))
+                            ''', (tvg_id, tvg_name, group_title, aliasesname, tvordero, tvg_logor, title, line))
 
         # 提交更改
         conn.commit()

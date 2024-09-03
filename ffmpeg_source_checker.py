@@ -133,6 +133,11 @@ def run_tests():
         last_failed_date TIMESTAMP
     )
     ''')
+    
+    cursor.execute('''
+    INSERT OR REPLACE INTO table_metadata (table_name, created_at)
+    VALUES ('failed_sources', datetime('now', 'localtime'))
+    ''')
 
     # 检查 filtered_playlists 表是否存在，不存在则创建
     cursor.execute('''

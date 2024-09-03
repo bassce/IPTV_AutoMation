@@ -40,7 +40,7 @@ ENV GITHUB_SEARCH_QUERY="直播源" \
     HOST_IP="" \
     FAILURE_THRESHOLD=12 \
     FAILED_SOURCES_CLEANUP_DAYS=20 \
-    FFMPEG_CHECK_FREQUENCY_HOURS=6
+    ffmpeg_check_frequency_minutes=360
 
 # 设置入口脚本权限
 RUN chmod +x /app/entrypoint.sh
