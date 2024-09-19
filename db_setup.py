@@ -1,10 +1,9 @@
 import pandas as pd
 import sqlite3
 import os
-import logging
+from logging_config import logger  # 使用外部的日志配置
 
-# 配置日志
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger.info("开始执行 频道名称导入 任务")
 
 # 定义文件路径
 excel_file = os.path.join('data', 'filter_conditions.xlsx')
@@ -14,7 +13,7 @@ def import_excel_to_db(excel_file, db_file):
     try:
         # 检查 Excel 文件是否存在
         if not os.path.exists(excel_file):
-            logging.error(f"Excel file not found: {excel_file}")
+            logger.error(f"Excel file not found: {excel_file}")
             raise FileNotFoundError(f"Excel file not found: {excel_file}")
 
         # 读取Excel文件
@@ -22,7 +21,7 @@ def import_excel_to_db(excel_file, db_file):
 
         # 检查数据是否为空
         if df.empty:
-            logging.error(f"Excel file {excel_file} is empty.")
+            logger.error(f"Excel file {excel_file} is empty.")
             raise ValueError(f"Excel file {excel_file} is empty.")
 
         # 连接SQLite数据库（如果数据库不存在则会创建）
@@ -64,12 +63,12 @@ def import_excel_to_db(excel_file, db_file):
 
         # 提交更改并关闭连接
         conn.commit()
-        logging.info(f"Data from {excel_file} has been successfully imported into {db_file}.")
+        logger.info(f"Data from {excel_file} has been successfully imported into {db_file}.")
 
     except (FileNotFoundError, ValueError) as e:
-        logging.error(f"Error: {e}")
+        logger.error(f"Error: {e}")
     except Exception as e:
-        logging.error(f"Unexpected error: {e}")
+        logger.error(f"Unexpected error: {e}")
     finally:
         if 'conn' in locals() and conn:
             conn.close()

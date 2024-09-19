@@ -1,230 +1,204 @@
 import asyncio
-import logging
 import json
 import os
+from logging_config import logger  # 使用 logging_config 中的 logger
+from asyncio import Queue
+from watchfiles import awatch
 import psutil
-import sqlite3
-from datetime import datetime, timedelta
-import subprocess
 
-# 配置日志
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(asctime)s - %(message)s')
+logger.info("程序启动")
 
-# 读取配置文件
+# 加载配置文件
 def load_config():
     try:
         with open("config.json", "r", encoding='utf-8') as f:
             config = json.load(f)
-        
-        # 更新配置值以允许环境变量覆盖
-        config['github_search']['search_query'] = os.getenv('GITHUB_SEARCH_QUERY', config['github_search']['search_query'])
-        config['github_search']['search_days'] = int(os.getenv('GITHUB_SEARCH_DAYS', config['github_search']['search_days']))
-        config['github_search']['github_token'] = os.getenv('GITHUB_TOKEN', config['github_search']['github_token'])
-
-        config['source_checker']['thread_limit'] = int(os.getenv('THREAD_LIMIT', config['source_checker']['thread_limit']))
-        config['source_checker']['height_limit'] = os.getenv('HEIGHT_LIMIT', config['source_checker']['height_limit'])
-        
-        codec_exclude_list = os.getenv('CODEC_EXCLUDE_LIST')
-        if codec_exclude_list:
-            config['source_checker']['codec_exclude_list'] = codec_exclude_list.split(',')
-        
-        config['source_checker']['latency_limit'] = int(os.getenv('LATENCY_LIMIT', config['source_checker']['latency_limit']))
-        config['source_checker']['retry_limit'] = int(os.getenv('RETRY_LIMIT', config['source_checker']['retry_limit']))
-
-        config['scheduler']['interval_minutes'] = int(os.getenv('SCHEDULER_INTERVAL_MINUTES', config['scheduler']['interval_minutes']))
-        config['scheduler']['failed_sources_cleanup_days'] = int(os.getenv('FAILED_SOURCES_CLEANUP_DAYS', config['scheduler']['failed_sources_cleanup_days']))
-        config['scheduler']['ffmpeg_check_frequency_minutes'] = int(os.getenv('ffmpeg_check_frequency_minutes', config['scheduler']['ffmpeg_check_frequency_minutes']))
-
-        # 新增读取 host_ip 环境变量
-        config['network']['host_ip'] = os.getenv('HOST_IP', config.get('network', {}).get('host_ip', 'localhost'))
-        
         return config
     except FileNotFoundError:
-        logging.error("config.json file not found.")
+        logger.error("config.json file not found.")
         raise
     except json.JSONDecodeError as e:
-        logging.error(f"Error parsing config.json: %s", e)
-        raise
-    except Exception as e:
-        logging.error("Unexpected error loading config.json: %s", e)
+        logger.error(f"Error parsing config.json: {e}")
         raise
 
-# 使用 load_config 函数加载配置
+# 加载配置
 config = load_config()
 
-def kill_processes_by_names(names):
-    for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
-        cmdline = proc.info.get('cmdline')
-        if cmdline:  # 检查 cmdline 是否为 None
-            for name in names:
-                if name in cmdline:
-                    logging.info("Killing process %s with PID %s", proc.info['name'], proc.info['pid'])
-                    proc.kill()
+# 从环境变量或配置文件中获取参数
+HOST_IP = os.getenv('HOST_IP', config["network"]["host_ip"])  # 获取主机 IP
+SCHEDULER_INTERVAL_MINUTES = int(os.getenv('SCHEDULER_INTERVAL_MINUTES', config['scheduler']['interval_minutes']))
+FAILED_SOURCES_CLEANUP_DAYS = int(os.getenv('FAILED_SOURCES_CLEANUP_DAYS', config['scheduler']['failed_sources_cleanup_days']))
+FFMPEG_CHECK_FREQUENCY_MINUTES = int(os.getenv('FFMPEG_CHECK_FREQUENCY_MINUTES', config['scheduler']['ffmpeg_check_frequency_minutes']))
+SEARCH_INTERVAL_HOURS = int(os.getenv('SEARCH_INTERVAL_HOURS', config['scheduler']['search_interval_hours']))  # 获取搜索间隔
 
-def table_exists(conn, table_name):
-    cursor = conn.cursor()
-    cursor.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table_name}';")
-    return cursor.fetchone() is not None
+# 创建任务队列
+task_queue = Queue()
 
-def get_table_creation_time(table_name):
-    conn = sqlite3.connect("data/iptv_sources.db")
-    cursor = conn.cursor()
+async def worker():
+    """从队列中获取任务并依次执行"""
+    while True:
+        task = await task_queue.get()
+        try:
+            logger.info(f"Executing task {task}")
+            await task  # 执行任务
+            logger.info(f"Task {task} completed successfully")
+        except Exception as e:
+            logger.error(f"Error executing task {task}: {e}")
+        task_queue.task_done()
 
-    try:
-        cursor.execute(f"SELECT created_at FROM table_metadata WHERE table_name = ?", (table_name,))
-        result = cursor.fetchone()
-        if result:
-            return datetime.fromisoformat(result[0])
+async def add_task_to_queue(task):
+    """添加单个任务到队列"""
+    await task_queue.put(task)
+
+async def is_process_running(script_names):
+    """检查是否有给定的脚本正在运行"""
+    for process in psutil.process_iter(['pid', 'name', 'cmdline']):
+        try:
+            # 确保 cmdline 不为 None
+            cmdline = process.info['cmdline']
+            if cmdline and any(script_name in cmdline for script_name in script_names):
+                return True
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            continue
+    return False
+
+async def schedule_daily_monitor():
+    """定时任务：将 daily_monitor.py 放入队列"""
+    monitored_scripts = [
+        "daily_monitor.py",
+        "ffmpeg_source_checker.py",
+        "github_search.py",
+        "hotel_search.py",
+        "db_setup.py",
+        "import_playlists.py"
+    ]
+    
+    while True:
+        await asyncio.sleep(SCHEDULER_INTERVAL_MINUTES * 60)
+        if not await is_process_running(monitored_scripts):
+            await add_task_to_queue(run_subprocess("daily_monitor.py"))
         else:
-            logging.warning("No creation time found for table %s", table_name)
-            return None
-    except sqlite3.Error as e:
-        logging.error("Error getting creation time for table %s: %s", table_name, e)
-        return None
-    finally:
-        conn.close()
+            logger.info("有其他任务正在运行，跳过 daily_monitor.py 调度")
 
+async def schedule_ffmpeg_source_checker():
+    """定时任务：将 ffmpeg_source_checker.py 放入队列"""
+    monitored_scripts = [
+        "daily_monitor.py",
+        "ffmpeg_source_checker.py",
+        "github_search.py",
+        "hotel_search.py",
+        "db_setup.py",
+        "import_playlists.py"
+    ]
+    
+    while True:
+        await asyncio.sleep(FFMPEG_CHECK_FREQUENCY_MINUTES * 60)
+        if not await is_process_running(monitored_scripts):
+            await add_task_to_queue(run_subprocess("ffmpeg_source_checker.py"))
+        else:
+            logger.info("有其他任务正在运行，跳过 ffmpeg_source_checker.py 调度")
+
+async def schedule_search_tasks():
+    """定期搜索任务：每隔 SEARCH_INTERVAL_HOURS 执行一次 GitHub 和网络搜索"""
+    while True:
+        await asyncio.sleep(SEARCH_INTERVAL_HOURS * 3600)  # 每 SEARCH_INTERVAL_HOURS 小时执行一次
+        logger.info("正在执行定期搜索任务...")
+        await add_task_to_queue(run_subprocess("github_search.py"))  # 执行 GitHub 搜索
+        await add_task_to_queue(run_subprocess("hotel_search.py"))  # 执行网络空间搜索
+        await add_task_to_queue(run_subprocess("import_playlists.py")) 
+        await add_task_to_queue(run_subprocess("ffmpeg_source_checker.py"))
+        await add_task_to_queue(run_subprocess("daily_monitor.py"))
+        
 async def run_subprocess(script_name):
-    logging.info("Starting %s...", script_name)
+    """运行子进程"""
+    logger.info(f"Starting {script_name}...")
     try:
         process = await asyncio.create_subprocess_exec("python", script_name)
-        await process.wait()  # 等待子进程完成
-        logging.info("Finished %s.", script_name)
+        await process.wait()
+        logger.info(f"Finished {script_name}.")
     except Exception as e:
-        logging.error("Failed to run %s: %s", script_name, e)
+        logger.error(f"Failed to run {script_name}: {e}")
 
-async def run_daily_monitor():
-    await run_subprocess("daily_monitor.py")
+async def watch_files():
+    """监控文件变化，将检测到的任务加入队列"""
+    paths_to_watch = ['data/user_uploaded', 'data/filter_conditions.xlsx']
+    logger.info(f"启动文件监控: {paths_to_watch}")
+
+    async for changes in awatch(*paths_to_watch):
+        logger.info(f"Detected file changes: {changes}")
+        await add_task_to_queue(run_subprocess("db_setup.py"))
+        await add_task_to_queue(run_subprocess("import_playlists.py"))
+        await add_task_to_queue(run_subprocess("ffmpeg_source_checker.py"))
+        await add_task_to_queue(run_subprocess("daily_monitor.py"))
 
 async def run_flask_server():
-    await run_subprocess("flask_server.py")
+    """启动 Flask 服务器"""
+    logger.info("使用 Waitress 启动 Flask 服务器...")
+    try:
+        process = await asyncio.create_subprocess_exec("waitress-serve", "--host", HOST_IP, "--port", "5000", "flask_server:app")
+        logger.info(f"Flask server started successfully on {HOST_IP}:5000.")
+        return process
+    except Exception as e:
+        logger.error(f"Error starting Flask server: {e}")
+        return None
 
-async def run_ffmpeg_source_checker():
-    await run_subprocess("ffmpeg_source_checker.py")
+async def monitor_flask_server(process):
+    """监控 Flask 服务器进程，如果进程停止则重启"""
+    while True:
+        if process and process.returncode is not None:
+            logger.error("Flask server has stopped. Restarting...")
+            process = await run_flask_server()
+        await asyncio.sleep(60)  # 每60秒检查一次
 
 async def clean_failed_sources():
-    conn = sqlite3.connect("data/iptv_sources.db")
-    cursor = conn.cursor()
-
-    try:
-        cutoff_date = datetime.now() - timedelta(days=config['scheduler']['failed_sources_cleanup_days'])
-        cursor.execute("DELETE FROM failed_sources WHERE last_failed_date IS NOT NULL AND last_failed_date < ?", (cutoff_date,))
-        conn.commit()
-        logging.info("Cleaned up failed sources older than %d days.", config['scheduler']['failed_sources_cleanup_days'])
-    except sqlite3.Error as e:
-        logging.error("Failed to clean up failed sources: %s", e)
-    finally:
-        conn.close()
-
-async def check_and_run_flask():
-    conn = sqlite3.connect("data/iptv_sources.db")
-    cursor = conn.cursor()
-
-    filtered_exists = table_exists(conn, "filtered_playlists")
-    readonly_exists = table_exists(conn, "filtered_playlists_readonly")
-
-    if filtered_exists and not readonly_exists:
-        creation_time = get_table_creation_time("filtered_playlists")
-        if creation_time:
-            time_diff = datetime.now() - creation_time
-            if time_diff < timedelta(hours=24):
-                logging.info("filtered_playlists exists and is less than 24 hours old. Running daily_monitor.py to create filtered_playlists_readonly.")
-                await run_daily_monitor()
-            else:
-                logging.info("filtered_playlists exists and is older than 24 hours. Running run_scheduler_tasks to reinitialize.")
-                await run_scheduler_tasks()
-        else:
-            logging.warning("filtered_playlists table exists, but creation time not found. Initializing the project.")
-            await run_scheduler_tasks()
-
-    elif not filtered_exists and not readonly_exists:
-        logging.info("Neither filtered_playlists nor filtered_playlists_readonly tables exist, initializing the project.")
-        await run_scheduler_tasks()
-
-    if readonly_exists:
-        creation_time = get_table_creation_time("filtered_playlists_readonly")
-        if creation_time:
-            time_diff = datetime.now() - creation_time
-            if time_diff > timedelta(hours=24):
-                logging.info("filtered_playlists_readonly table is older than 24 hours, running daily_monitor.py first.")
-                await run_daily_monitor()
-        else:
-            logging.warning("filtered_playlists_readonly table exists, but creation time not found. Deleting the table.")
-            cursor.execute("DROP TABLE IF EXISTS filtered_playlists_readonly")
-            conn.commit()
-
-            logging.info("Running daily_monitor.py to recreate filtered_playlists_readonly table.")
-            await run_daily_monitor()
-
-            # 在重新生成表后，检查表是否存在
-            if not table_exists(conn, "filtered_playlists_readonly"):
-                logging.error("Failed to create filtered_playlists_readonly table, cannot start flask_server.")
-                return
-
-    # 确保表存在后再启动flask_server
-    await run_flask_server()
-    conn.close()
-
-async def run_scheduler_tasks():
-    logging.info("Cleaning up old failed sources before starting other tasks...")
-    await clean_failed_sources()  # 添加清理任务，确保导入前的清理
-
-    logging.info("Starting database initialization (db_setup.py)...")
-    await run_subprocess("db_setup.py")
-
-    logging.info("Starting to search and import new sources...")
-    await run_subprocess("github_search.py")
-    await run_subprocess("import_playlists.py")
-
-    logging.info("Starting ffmpeg_source_checker.py...")
-    await run_subprocess("ffmpeg_source_checker.py")
-
-    logging.info("Stopping flask_server.py and daily_monitor.py if running...")
-    kill_processes_by_names(["flask_server.py", "daily_monitor.py"])
-
-    logging.info("Restarting daily_monitor.py and flask_server.py...")
-    await run_daily_monitor()
-    await run_flask_server()
-
-
-async def schedule_daily_monitor(interval_minutes):
-    while True:
-        await asyncio.sleep(interval_minutes * 60)
-        await run_daily_monitor()
-
-        # 检查 flask_server.py 是否正在运行
-        result = subprocess.run(['pgrep', '-f', 'flask_server.py'], stdout=subprocess.PIPE)
-        if result.stdout:
-            # 如果已经在运行，先杀掉再重新启动
-            subprocess.run(['pkill', '-f', 'flask_server.py'])
-            logging.info("Flask server stopped. Restarting...")
-            await run_flask_server()
-        else:
-            # 如果没有运行，则直接启动
-            logging.info("Flask server not running. Starting...")
-            await run_flask_server()
-
-async def schedule_ffmpeg_check():
-    while True:
-        await asyncio.sleep(config['scheduler']['ffmpeg_check_frequency_minutes'] * 60)
-        await run_ffmpeg_source_checker()
+    """清理失败的源"""
+    logger.info("正在清理废弃直播源")
+    await run_subprocess("clean_failed_sources.py")
+    logger.info("Failed sources cleanup completed.")
 
 async def schedule_failed_sources_cleanup():
+    """定期清理失效的源"""
     while True:
-        await asyncio.sleep(config['scheduler']['failed_sources_cleanup_days'] * 86400)
-        await clean_failed_sources()
+        await asyncio.sleep(FAILED_SOURCES_CLEANUP_DAYS * 86400)  # 20天执行一次
+        await add_task_to_queue(clean_failed_sources())
 
-def run_scheduler():
-    loop = asyncio.new_event_loop()  # 创建新的事件循环以避免旧的弃用警告
-    asyncio.set_event_loop(loop)
-    tasks = [
-        check_and_run_flask(),  # 检查表的存在性并执行相应的操作
-        schedule_daily_monitor(config['scheduler']['interval_minutes']),
-        schedule_ffmpeg_check(),
-        schedule_failed_sources_cleanup()
-    ]
+async def run_initial_tasks():
+    """执行初始化任务，并将它们放入队列"""
+    logger.info("初始化...")
+    await add_task_to_queue(run_subprocess("db_setup.py"))
+    await add_task_to_queue(run_subprocess("github_search.py"))
+    await add_task_to_queue(run_subprocess("hotel_search.py"))
+    await add_task_to_queue(run_subprocess("import_playlists.py"))
+    await add_task_to_queue(run_subprocess("ffmpeg_source_checker.py"))
+    await add_task_to_queue(run_subprocess("daily_monitor.py"))
 
-    loop.run_until_complete(asyncio.gather(*tasks))
+async def main():
+    # 启动文件监控任务
+    asyncio.create_task(watch_files())
+
+    # 启动定时测速任务调度
+    asyncio.create_task(schedule_daily_monitor())
+    asyncio.create_task(schedule_ffmpeg_source_checker())
+
+    # 启动定期清理失效的源任务
+    asyncio.create_task(schedule_failed_sources_cleanup())
+
+    # 启动定期搜索任务
+    asyncio.create_task(schedule_search_tasks())
+
+    # 启动 Flask 服务器
+    flask_process = await run_flask_server()
+    if flask_process:
+        asyncio.create_task(monitor_flask_server(flask_process))
+
+    # 创建单个 worker 协程任务
+    worker_task = asyncio.create_task(worker())
+
+    # 添加初始化任务到队列
+    await run_initial_tasks()
+
+    # 防止脚本退出，等待所有任务运行完成
+    await worker_task
 
 if __name__ == "__main__":
-    run_scheduler()
+    asyncio.run(main())

@@ -32,10 +32,10 @@ def calculate_score(resolution_value, format, latency, download_speed, stability
     # 权重设定
     weight_latency = 0.3
     weight_download_speed = 0.3
-    weight_resolution = 0.15
-    weight_format = 0.1
-    weight_stability = 0.075
-    weight_success_rate = 0.075
+    weight_resolution = 0.08
+    weight_format = 0.07
+    weight_stability = 0.15
+    weight_success_rate = 0.1
 
     # 分辨率评分映射
     resolution_scores = {
@@ -62,7 +62,7 @@ def calculate_score(resolution_value, format, latency, download_speed, stability
     format_score = format_scores.get(format, 0.1)
 
     max_latency = 10.0  # 最大延迟（秒）
-    max_download_speed = 40.0  # 最大下载速度（Mbps）
+    max_download_speed = 80.0  # 最大下载速度（Mbps）
 
     latency_score = max(0, 1 - (latency / max_latency))  # 延迟越低，分数越高
     download_speed_score = min(download_speed / max_download_speed, 1)  # 下载速度越高，分数越高

@@ -1,24 +1,29 @@
 {
   "github_search": {
-    "search_query": "直播源",
-    "search_days": 25,
+    "search_query": "直播源,iptv",
+    "search_days": 3,
     "github_token": "your_github_token"
   },
   "source_checker": {
-    "thread_limit": 10,
-    "height_limit": null,
+    "threads": 3,
+    "thread_limit": 0,
+    "height_limit": 1080,
     "codec_exclude_list": ["Unknown"],
-    "latency_limit": 5000,
-    "retry_limit": 1,
-	  "failure_threshold": 12
+    "latency_limit": 3000,
+    "retry_limit": 0,
+    "failure_threshold": 6
   },
   "scheduler": {
-    "interval_minutes": 30,
-    "search_interval_days": 2,
+    "interval_minutes": 60,
+    "search_interval_hours": 24,
     "failed_sources_cleanup_days": 20,
     "ffmpeg_check_frequency_minutes": 360
   },
   "network": {
     "host_ip": "127.0.0.1"
+  },
+  "search_params": {
+    "subdivision": "Henan,Hubei",
+    "keywords": ["ZHGXTV","iptv/live/zh_cn.js"]
   }
 }
