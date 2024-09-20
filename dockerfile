@@ -50,6 +50,8 @@ ENV GITHUB_SEARCH_QUERY="直播源,iptv" \
     SEARCH_INTERVAL_HOURS=24 \
     FAILED_SOURCES_CLEANUP_DAYS=20 \
     ffmpeg_check_frequency_minutes=360 \
+    EMBY_SERVER_URL="http://your-emby-server-address:8096" \
+    API_KEY="your_emby_api_key" \
     HOST_IP="" \
     SUBDIVISION="Henan,Hubei"
 

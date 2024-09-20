@@ -28,11 +28,13 @@ iptv_automation/
 │
 ├── github_search.py                   # GitHub 搜索和下载模块
 ├── hotel_search.py                    # 网络空间搜索引擎搜索和下载模块
+├── domain_batch_query.py              # IP转域名
 ├── db_setup.py                        # 频道列表模块，将 Excel 频道模板导入到 SQLite 的 `iptv_sources` 表中
 ├── import_playlists.py                # 将 GitHub 搜索下载的直播源导入 SQLite 的 `iptv_playlists` 表中
 ├── calculate_score.py                 # 直播源评分机制
 ├── ffmpeg_source_checker.py           # IPTV 源初步筛选，调用 ffmpeg 检测直播源的延迟、分辨率和视频格式，并保存到 SQLite 的 `filtered_playlists` 表中
 ├── daily_monitor.py                   # 延迟和下载速度检测模块，对 `filtered_playlists` 表中的直播源进行检测
+├── update_emby_guide.py               # emby_server频道自动更新
 ├── flask_server.py                    # Flask 服务器模块，生成本地固定频道网址，根据评分机制选择最优质频道
 ├── clean_failed_sources.py            # 废弃直播源清理模块，对 SQLite 的 `failed_sources` 表进行重置
 ├── scheduler.py                       # 初始化、定期检测、文件监测和定时更新模块

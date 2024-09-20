@@ -77,6 +77,7 @@ async def schedule_daily_monitor():
         await asyncio.sleep(SCHEDULER_INTERVAL_MINUTES * 60)
         if not await is_process_running(monitored_scripts):
             await add_task_to_queue(run_subprocess("daily_monitor.py"))
+            await add_task_to_queue(run_subprocess("update_emby_guide.py"))
         else:
             logger.info("有其他任务正在运行，跳过 daily_monitor.py 调度")
 
@@ -108,6 +109,7 @@ async def schedule_search_tasks():
         await add_task_to_queue(run_subprocess("import_playlists.py")) 
         await add_task_to_queue(run_subprocess("ffmpeg_source_checker.py"))
         await add_task_to_queue(run_subprocess("daily_monitor.py"))
+        await add_task_to_queue(run_subprocess("update_emby_guide.py"))
         
 async def run_subprocess(script_name):
     """运行子进程"""
@@ -130,6 +132,7 @@ async def watch_files():
         await add_task_to_queue(run_subprocess("import_playlists.py"))
         await add_task_to_queue(run_subprocess("ffmpeg_source_checker.py"))
         await add_task_to_queue(run_subprocess("daily_monitor.py"))
+        await add_task_to_queue(run_subprocess("update_emby_guide.py"))
 
 async def run_flask_server():
     """启动 Flask 服务器"""
@@ -171,6 +174,7 @@ async def run_initial_tasks():
     await add_task_to_queue(run_subprocess("import_playlists.py"))
     await add_task_to_queue(run_subprocess("ffmpeg_source_checker.py"))
     await add_task_to_queue(run_subprocess("daily_monitor.py"))
+    await add_task_to_queue(run_subprocess("update_emby_guide.py"))
 
 async def main():
     # 启动文件监控任务
