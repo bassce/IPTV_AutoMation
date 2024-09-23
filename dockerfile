@@ -4,9 +4,9 @@ FROM python:3.12.5-slim
 # 设置工作目录
 WORKDIR /app
 
-# 更新包列表并安装系统依赖
+# 更新包列表并安装系统依赖，并安装 tini 作为 init 系统
 RUN apt-get update \
-    && apt-get install -y unzip wget ffmpeg bash sqlite3 libnss3 libxss1 libappindicator3-1 libasound2 xdg-utils fonts-liberation libcurl4 ca-certificates \
+    && apt-get install -y unzip wget ffmpeg bash sqlite3 libnss3 libxss1 libappindicator3-1 libasound2 xdg-utils fonts-liberation libcurl4 ca-certificates tini \
     && cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
     && echo "Asia/Shanghai" > /etc/timezone \
     && pip install --upgrade pip \
@@ -36,7 +36,7 @@ COPY . .
 VOLUME /app/data
 
 # 添加 Docker 参数作为环境变量
-ENV GITHUB_SEARCH_QUERY="直播源,iptv" \
+ENV GITHUB_SEARCH_QUERY="直播源,iptv,高清电视,电视直播" \
     GITHUB_SEARCH_DAYS=3 \
     GITHUB_TOKEN="" \
     THREADS=0 \
@@ -53,10 +53,14 @@ ENV GITHUB_SEARCH_QUERY="直播源,iptv" \
     EMBY_SERVER_URL="http://your-emby-server-address:8096" \
     API_KEY="your_emby_api_key" \
     HOST_IP="" \
-    SUBDIVISION="Henan,Hubei"
+    SUBDIVISION="Henan,Hubei" \
+    PORT=5000
+
+# 暴露容器端口
+EXPOSE 5000
 
 # 设置入口脚本权限
 RUN chmod +x /app/entrypoint.sh
 
-# 设置启动命令
-ENTRYPOINT ["/app/entrypoint.sh"]
+# 使用 tini 作为 init 进程
+ENTRYPOINT ["/usr/bin/tini", "-s", "--", "/app/entrypoint.sh"]

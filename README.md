@@ -46,37 +46,46 @@ iptv_automation/
 ```
 
 
+## `2.1`版本
+- 修复chrome僵尸进程的bug
+- 修复在检测期间直播源无法播放的bug
+- 增加空间引擎搜索IP反向解析域名功能
+- 增加检测结束后自动刷新emby电视指南功能
+- 增加自定义flask_server端口功能
+
+
 ## `docker-compose.yml` 示例
 ```yaml
-version: '3.8'
+version: '2.1'
 
 services:
   iptv_automation:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: iptv_automation_container
+    image: iptv_auto_mation:2.1  # 替换为你的镜像名称
+    container_name: iptv_auto_mation-2.1
+    init: true  # 使用 tini 初始化
     environment:
-      GITHUB_SEARCH_QUERY: "直播源,iptv"
-      GITHUB_SEARCH_DAYS: 3
+      GITHUB_SEARCH_QUERY: "直播源,iptv,高清电视,电视直播"  # github搜索关键字，可自行添加
+      GITHUB_SEARCH_DAYS: 3  # 搜索github最近3天更新的直播源
       GITHUB_TOKEN: ""  # 在此处添加你的 GitHub Token
-      THREADS: 0
-      THREAD_LIMIT: 0
-      HEIGHT_LIMIT: 1080
-      CODEC_EXCLUDE_LIST: "Unknown"
-      LATENCY_LIMIT: 3000
-      RETRY_LIMIT: 0
-      FAILURE_THRESHOLD: 6
-      SCHEDULER_INTERVAL_MINUTES: 30
-      SEARCH_INTERVAL_HOURS: 4
-      FAILED_SOURCES_CLEANUP_DAYS: 20
-      ffmpeg_check_frequency_minutes: 360
-      HOST_IP: ""  # 这里可以指定主机的 IP 地址，因为是 host 模式
-      SUBDIVISION: "Henan,Hubei"
+      THREADS: 3  # 下载速度检测使用的CPU线程数，建议根据处理器性能调整，AMD Ryzen V1500B设置为3
+      THREAD_LIMIT: 0  # 分辨率和连通性检测使用的CPU线程数，0表示使用线程数为CPU总线程数-1
+      HEIGHT_LIMIT: 1080 # 只保留1080P以上分辨率直播源
+      CODEC_EXCLUDE_LIST: "Unknown"  # 排除无法检测出分辨率的源
+      LATENCY_LIMIT: 3000  # 检测中允许直播源的最大的延迟
+      RETRY_LIMIT: 0  # 检测失败重试次数
+      FAILURE_THRESHOLD: 6  # 直播源检测失败标记为废弃源的次数
+      SCHEDULER_INTERVAL_MINUTES: 30  # 下载速度检测任务间隔分钟
+      SEARCH_INTERVAL_HOURS: 24  # 定期搜索任务间隔小时
+      FAILED_SOURCES_CLEANUP_DAYS: 20   # 废弃源定期清理任务间隔天数
+      ffmpeg_check_frequency_minutes: 360  # 分辨率和连通性检测任务间隔分钟
+      EMBY_SERVER_URL: "http://your-emby-server-address:8096"  # 修改为你的emby内网地址，没有emby就删除该参数
+      API_KEY: "your_emby_api_key"  # 修改为你的emby的api_key，没有emby就删除该参数
+      HOST_IP: ""  # 运行docker主机的 IP 地址
+      SUBDIVISION: "Henan,Hubei"  # 建议只填写所在省
+      PORT: 5000  # 设置容器中的 Flask 服务器端口为 5000
     volumes:
       - ./data:/app/data  # 将主机的 ./data 目录映射到容器中的 /app/data
     network_mode: "host"  # 使用 host 网络模式
-    restart: unless-stopped  # 配置自动重启策略
 ```
 
 
@@ -84,7 +93,7 @@ services:
 
 | 参数 | 默认值 | 可用值 |
 | ---- | ---- | ---- |
-| GITHUB_SEARCH_QUERY | `直播源,iptv` | 可设置为任意文字 |
+| GITHUB_SEARCH_QUERY | `直播源,iptv,高清电视,电视直播` | 可设置为任意文字 |
 | GITHUB_SEARCH_DAYS | `10` | `10`,`15`,`20` 等任意整数 |
 | GITHUB_TOKEN | ` ` | 必填 |
 | THREADS | `0` | 不大于宿主机 CPU 2倍的线程数 |
@@ -101,6 +110,9 @@ services:
 | HOST_IP | ` ` | 主机IP |
 | SUBDIVISION | `Henan,Hubei` | 建议保留你所在省的名称即可，首字母大写 |
 | /app/data | ./data | 宿主机映射路径，自行修改 |
+| EMBY_SERVER_URL | `http://your-emby-server-address:8096` | emby内网地址，没有emby就删除该参数 |
+| API_KEY | `your_emby_api_key` | emby的api_key，没有emby就删除该参数 |
+| PORT | `5000` | 任意端口 |
 
 
 ### 参数说明
@@ -201,10 +213,26 @@ services:
     - **作用**: 该参数用于 ZoomEye 或其他网络空间搜索工具，指定搜索结果所在的地理区域。例如，设置为 `"Henan,Hubei"` 表示只搜索来自河南和湖北的直播源。
     - **示例**: `"Henan,Hubei"`（表示只搜索河南和湖北的网络空间资源）
 
+17. **EMBY_SERVER_URL**
+    - **类型**: `字符串`
+    - **说明**: emby内网http地址。
+    - **作用**: 该参数用于配合 API_KEY 在更新 aggregated_channels.m3u8 后刷新emby服务器电视直播的刷新指南功能。
+    - **示例**: `"http://192.168.1.2:8096"`
+18. **API_KEY**
+    - **类型**: `字符串`
+    - **说明**: emby_server的api密钥。
+    - **作用**: 该参数用于配合 API_KEY 在更新 aggregated_channels.m3u8 后刷新emby服务器电视直播的刷新指南功能。
+    - **示例**: `"0578sa723ba34f30239"`
+
+19. **PORT**
+    - **类型**: `正整数`
+    - **说明**: 设置容器中的 Flask 服务器端口运行端口。
+    - **作用**: 该参数用于确定 aggregated_channels.m3u8 内的内网播放地址端口和flask_server.py运行的端口号，如果使用Bridge模式还要增加端口映射`ports: "5000:5000"`。
+
 
 ## 局域网播放文件的下载地址
 
-- `http://HOST_IP:5000/aggregated_channels.m3u8`
+- `http://HOST_IP:PORT/aggregated_channels.m3u8`
 
 
 

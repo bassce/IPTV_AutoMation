@@ -61,8 +61,13 @@ chrome_options.add_argument('--no-sandbox')
 chrome_options.add_argument('--disable-dev-shm-usage')
 chrome_options.add_argument('--incognito')
 
-# 初始化 WebDriver
-driver = webdriver.Chrome(options=chrome_options)
+# 封装关闭浏览器函数
+def close_driver(driver):
+    try:
+        driver.quit()  # 关闭浏览器
+        driver.service.stop()  # 停止 chromedriver 服务
+    except Exception as e:
+        logger.error(f"Error closing Chrome and Chromedriver: {e}")
 
 def search_fofa(keyword, subdivision):
     """通过 FOFA 进行搜索并返回页面内容"""
@@ -170,49 +175,53 @@ with open(os.path.join(output_dir, "ZHGXTV.m3u"), "w", encoding='utf-8') as m3u:
 with open(os.path.join(output_dir, "KUTV.m3u"), "w", encoding='utf-8') as m3u:
     m3u.write("") 
 
-# 遍历每个地区和关键词执行搜索和处理
-for subdivision in SUBDIVISIONS:
-    for keyword in KEYWORDS:
-        logger.info(f"Processing keyword: {keyword} in {subdivision}")
-        
-        # 搜索 FOFA 并提取 URL
-        fofa_content = search_fofa(keyword, subdivision)
-        fofa_urls = extract_urls(fofa_content)
-        logger.info(f"Fofa URLs for {keyword} in {subdivision}: {fofa_urls}")
+try:    
+    # 初始化 WebDriver
+    driver = webdriver.Chrome(options=chrome_options)
+    
+    # 遍历每个地区和关键词执行搜索和处理
+    for subdivision in SUBDIVISIONS:
+        for keyword in KEYWORDS:
+            logger.info(f"Processing keyword: {keyword} in {subdivision}")
+            
+            # 搜索 FOFA 并提取 URL
+            fofa_content = search_fofa(keyword, subdivision)
+            fofa_urls = extract_urls(fofa_content)
+            logger.info(f"Fofa URLs for {keyword} in {subdivision}: {fofa_urls}")
 
-        # 搜索 ZoomEye 并提取 URL
-        zoomeye_content = search_zoomeye(keyword, subdivision)
-        zoomeye_urls = extract_urls(zoomeye_content)
-        logger.info(f"ZoomEye URLs for {keyword} in {subdivision}: {zoomeye_urls}")
+            # 搜索 ZoomEye 并提取 URL
+            zoomeye_content = search_zoomeye(keyword, subdivision)
+            zoomeye_urls = extract_urls(zoomeye_content)
+            logger.info(f"ZoomEye URLs for {keyword} in {subdivision}: {zoomeye_urls}")
 
-        # 合并所有找到的 URL
-        all_urls = set(fofa_urls + zoomeye_urls)  # 去重合并
+            # 合并所有找到的 URL
+            all_urls = set(fofa_urls + zoomeye_urls)  # 去重合并
 
-        # 保存所有搜索结果到数据库
-        for url in all_urls:
-            source = "FOFA" if url in fofa_urls else "ZoomEye"
-            insert_url_to_db(keyword, url, source)
+            # 保存所有搜索结果到数据库
+            for url in all_urls:
+                source = "FOFA" if url in fofa_urls else "ZoomEye"
+                insert_url_to_db(keyword, url, source)
 
-        # 如果关键字是 "iptv/live/zh_cn.js"，处理并保存为 KUTV.m3u 格式
-        if keyword == "iptv/live/zh_cn.js":
-            with open(os.path.join(output_dir, "KUTV.m3u"), "a", encoding='utf-8') as m3u:
-                for url in all_urls:
-                    processed_data = process_iptv_live(url)
-                    if processed_data:
-                        for line in processed_data:
-                            m3u.write(line + "\n")
-        
-        # 如果关键字是 "ZHGXTV"，处理并保存为 ZHGXTV.m3u 格式
-        if keyword == "ZHGXTV":
-            with open(os.path.join(output_dir, "ZHGXTV.m3u"), "a", encoding='utf-8') as m3u:
-                for url in all_urls:
-                    processed_data = process_zhgxtv(url)
-                    if processed_data:
-                        for line in processed_data:
-                            m3u.write(line + "\n")
+            # 如果关键字是 "iptv/live/zh_cn.js"，处理并保存为 KUTV.m3u 格式
+            if keyword == "iptv/live/zh_cn.js":
+                with open(os.path.join(output_dir, "KUTV.m3u"), "a", encoding='utf-8') as m3u:
+                    for url in all_urls:
+                        processed_data = process_iptv_live(url)
+                        if processed_data:
+                            for line in processed_data:
+                                m3u.write(line + "\n")
+            
+            # 如果关键字是 "ZHGXTV"，处理并保存为 ZHGXTV.m3u 格式
+            if keyword == "ZHGXTV":
+                with open(os.path.join(output_dir, "ZHGXTV.m3u"), "a", encoding='utf-8') as m3u:
+                    for url in all_urls:
+                        processed_data = process_zhgxtv(url)
+                        if processed_data:
+                            for line in processed_data:
+                                m3u.write(line + "\n")
 
-# 关闭 WebDriver 和数据库连接
-driver.quit()
-conn.close()
-
-logger.info("All searches and processing completed.")
+finally:
+    # 无论是否发生异常，都会执行关闭操作
+    close_driver(driver)  # 确保 driver 被正确关闭
+    conn.close()
+    logger.info("All searches and processing completed.")

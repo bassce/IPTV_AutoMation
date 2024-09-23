@@ -30,6 +30,7 @@ SCHEDULER_INTERVAL_MINUTES = int(os.getenv('SCHEDULER_INTERVAL_MINUTES', config[
 FAILED_SOURCES_CLEANUP_DAYS = int(os.getenv('FAILED_SOURCES_CLEANUP_DAYS', config['scheduler']['failed_sources_cleanup_days']))
 FFMPEG_CHECK_FREQUENCY_MINUTES = int(os.getenv('FFMPEG_CHECK_FREQUENCY_MINUTES', config['scheduler']['ffmpeg_check_frequency_minutes']))
 SEARCH_INTERVAL_HOURS = int(os.getenv('SEARCH_INTERVAL_HOURS', config['scheduler']['search_interval_hours']))  # 获取搜索间隔
+PORT = int(os.getenv('PORT', int(config["network"]["port"])))
 
 # 创建任务队列
 task_queue = Queue()
@@ -69,6 +70,7 @@ async def schedule_daily_monitor():
         "ffmpeg_source_checker.py",
         "github_search.py",
         "hotel_search.py",
+        "domain_batch_query.py",
         "db_setup.py",
         "import_playlists.py"
     ]
@@ -88,6 +90,7 @@ async def schedule_ffmpeg_source_checker():
         "ffmpeg_source_checker.py",
         "github_search.py",
         "hotel_search.py",
+        "domain_batch_query.py",
         "db_setup.py",
         "import_playlists.py"
     ]
@@ -106,6 +109,7 @@ async def schedule_search_tasks():
         logger.info("正在执行定期搜索任务...")
         await add_task_to_queue(run_subprocess("github_search.py"))  # 执行 GitHub 搜索
         await add_task_to_queue(run_subprocess("hotel_search.py"))  # 执行网络空间搜索
+        await add_task_to_queue(run_subprocess("domain_batch_query.py"))
         await add_task_to_queue(run_subprocess("import_playlists.py")) 
         await add_task_to_queue(run_subprocess("ffmpeg_source_checker.py"))
         await add_task_to_queue(run_subprocess("daily_monitor.py"))
@@ -138,8 +142,8 @@ async def run_flask_server():
     """启动 Flask 服务器"""
     logger.info("使用 Waitress 启动 Flask 服务器...")
     try:
-        process = await asyncio.create_subprocess_exec("waitress-serve", "--host", HOST_IP, "--port", "5000", "flask_server:app")
-        logger.info(f"Flask server started successfully on {HOST_IP}:5000.")
+        process = await asyncio.create_subprocess_exec("waitress-serve", "--host", HOST_IP, "--port", str(PORT), "flask_server:app")
+        logger.info(f"Flask server started successfully on {HOST_IP}:{PORT}.")
         return process
     except Exception as e:
         logger.error(f"Error starting Flask server: {e}")
@@ -171,6 +175,7 @@ async def run_initial_tasks():
     await add_task_to_queue(run_subprocess("db_setup.py"))
     await add_task_to_queue(run_subprocess("github_search.py"))
     await add_task_to_queue(run_subprocess("hotel_search.py"))
+    await add_task_to_queue(run_subprocess("domain_batch_query.py"))
     await add_task_to_queue(run_subprocess("import_playlists.py"))
     await add_task_to_queue(run_subprocess("ffmpeg_source_checker.py"))
     await add_task_to_queue(run_subprocess("daily_monitor.py"))

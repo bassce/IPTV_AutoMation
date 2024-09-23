@@ -28,10 +28,11 @@ def load_config():
 
 config = load_config()
 HOST_IP = os.getenv('HOST_IP', config["network"]["host_ip"])  # 读取 host_ip 配置
+PORT = int(os.getenv('PORT', int(config["network"]["port"])))
 
 def get_channel_sources(aliasesname):
     try:
-        conn = sqlite3.connect("data/iptv_sources.db")
+        conn = sqlite3.connect("data/filtered_sources_readonly.db")
         query = """
         SELECT * FROM filtered_playlists_readonly
         WHERE aliasesname = ?
@@ -88,6 +89,6 @@ if __name__ == "__main__":
     try:
         # 使用 Waitress 启动 Flask 服务器，host 设置为 HOST_IP
         logger.info("Starting Flask server with Waitress...")
-        serve(app, host=HOST_IP, port=5000, threads=2)  # 可根据需求调整 threads 参数
+        serve(app, host=HOST_IP, port=PORT, threads=2)  # 可根据需求调整 threads 参数
     except Exception as e:
         logger.error(f"Failed to start Flask server: {e}")

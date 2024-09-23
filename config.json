@@ -20,7 +20,8 @@
     "ffmpeg_check_frequency_minutes": 360
   },
   "network": {
-    "host_ip": "127.0.0.1"
+    "host_ip": "127.0.0.1",
+    "port": 5000
   },
   "search_params": {
     "subdivision": "Henan,Hubei",

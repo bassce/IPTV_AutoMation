@@ -15,6 +15,7 @@ logger.info("开始执行 下载速度检测 任务")
 
 # 从配置文件中读取参数
 DB_PATH = 'data/iptv_sources.db'
+NEW_DB_PATH = 'data/filtered_sources_readonly.db'
 
 # 读取配置文件
 def load_config():
@@ -44,6 +45,7 @@ LATENCY_LIMIT = float(os.getenv('LATENCY_LIMIT', config['source_checker']['laten
 RETRY_LIMIT = int(os.getenv('RETRY_LIMIT', config['source_checker']['retry_limit']))  # 重试次数
 FAILURE_THRESHOLD = int(os.getenv('FAILURE_THRESHOLD', config['source_checker']['failure_threshold']))  # 最大失败次数阈值
 HOST_IP = os.getenv('HOST_IP', config['network']['host_ip'])
+PORT = int(os.getenv('PORT', int(config["network"]["port"])))
 
 def convert_to_kb(size, unit):
     size = float(size)
@@ -227,6 +229,9 @@ def run_tests():
 
         df = pd.read_sql_query("SELECT * FROM filtered_playlists ORDER BY id", conn)
 
+        # 将 filtered_playlists_readonly 表复制到新的数据库文件
+        copy_table_to_new_db()
+
     finally:
         conn.close()
 
@@ -278,7 +283,7 @@ def generate_m3u8_file():
                 aliasesname = row['aliasesname']
                 if aliasesname not in unique_channels:
                     m3u8_file.write(f"#EXTINF:-1 tvg-name=\"{row['tvg_name']}\" group-title=\"{row['group_title']}\",{row['title']}\n")
-                    m3u8_file.write(f"http://{HOST_IP}:5000/{row['aliasesname']}\n")
+                    m3u8_file.write(f"http://{HOST_IP}:{PORT}/{row['aliasesname']}\n")
                     unique_channels.add(aliasesname)
                     logger.info(f"Added channel to M3U8: {row['title']} with URL path /{row['aliasesname']}")
         logger.info(f"Generated {m3u8_path} file successfully.")
@@ -288,6 +293,73 @@ def generate_m3u8_file():
         logger.error(f"Error generating M3U8 file: {e}")
     finally:
         conn.close()
+
+def copy_table_to_new_db():
+    try:
+        # 连接到现有数据库和新数据库
+        source_conn = sqlite3.connect(DB_PATH)
+        dest_conn = sqlite3.connect(NEW_DB_PATH)
+
+        source_cursor = source_conn.cursor()
+        dest_cursor = dest_conn.cursor()
+
+        # 检查目标数据库中的 filtered_playlists_readonly 表是否存在
+        dest_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='filtered_playlists_readonly'")
+        table_exists = dest_cursor.fetchone()
+
+        if table_exists:
+            logger.info("表 filtered_playlists_readonly 已存在，正在清空表内容...")
+            dest_cursor.execute("DELETE FROM filtered_playlists_readonly")
+            dest_conn.commit()
+        else:
+            # 如果表不存在，先在目标数据库中创建它
+            logger.info("表 filtered_playlists_readonly 不存在，创建新表...")
+            dest_cursor.execute('''
+                CREATE TABLE filtered_playlists_readonly (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tvg_id TEXT,
+                    tvg_name TEXT,
+                    group_title TEXT,
+                    aliasesname TEXT,
+                    tvordero INTEGER,
+                    tvg_logor TEXT,
+                    title TEXT,
+                    url TEXT,
+                    latency INTEGER,
+                    resolution TEXT,
+                    format TEXT,
+                    download_speed FLOAT,
+                    score FLOAT,
+                    failure_count INTEGER DEFAULT 0,
+                    last_failed_date TIMESTAMP DEFAULT 0
+                )
+            ''')
+            dest_conn.commit()
+
+        # 从源数据库复制表的内容到目标数据库
+        logger.info("开始将 filtered_playlists 表内容复制到 filtered_playlists_readonly...")
+        source_cursor.execute("SELECT * FROM filtered_playlists")
+        rows = source_cursor.fetchall()
+
+        if rows:
+            # 获取源表的列数，并使用占位符插入多列数据
+            columns = [description[0] for description in source_cursor.description]
+            placeholders = ', '.join(['?'] * len(columns))  # 为每个列生成占位符
+
+            # 使用 executemany 插入多行数据
+            dest_cursor.executemany(f"""
+                INSERT INTO filtered_playlists_readonly ({', '.join(columns)}) 
+                VALUES ({placeholders})
+            """, rows)
+            dest_conn.commit()
+
+        logger.info("成功将 filtered_playlists_readonly 复制到新的数据库文件 filtered_sources_readonly.db")
+
+    except sqlite3.Error as e:
+        logger.error(f"Error copying filtered_playlists_readonly to new database: {e}")
+    finally:
+        source_conn.close()
+        dest_conn.close()
 
 if __name__ == "__main__":
     run_tests()
